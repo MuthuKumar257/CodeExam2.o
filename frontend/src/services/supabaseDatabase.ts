@@ -200,6 +200,7 @@ export function mergeArraySmart<T extends { id?: string | number }>(localArr: T[
 
 function loadStorage<T>(key: string, fallback: T): T {
   try {
+    if (import.meta.env.PROD) return fallback;
     const raw = localStorage.getItem(key);
     if (!raw) {
       if (Array.isArray(fallback)) {
@@ -225,13 +226,14 @@ function saveStorage<T>(key: string, data: T): void {
 }
 
 // Initial Memory Store
-let localUsers: User[] = loadStorage(STORAGE_KEYS.USERS, DEMO_USERS);
-let localClasses: Classroom[] = loadStorage(STORAGE_KEYS.CLASSES, INITIAL_CLASSES);
-let localDepartments: Department[] = loadStorage(STORAGE_KEYS.DEPARTMENTS, INITIAL_DEPARTMENTS);
-let localAssessments: Assessment[] = loadStorage(STORAGE_KEYS.ASSESSMENTS, INITIAL_ASSESSMENTS);
-let localQuestions: Question[] = loadStorage(STORAGE_KEYS.QUESTIONS, INITIAL_QUESTIONS);
-let localSessions: CandidateSession[] = loadStorage(STORAGE_KEYS.SESSIONS, INITIAL_SESSIONS);
-let localSubmissions: Submission[] = loadStorage(STORAGE_KEYS.SUBMISSIONS, INITIAL_SUBMISSIONS);
+const localFallback = <T>(seed: T): T => (import.meta.env.PROD ? (Array.isArray(seed) ? [] : {}) as T : seed);
+let localUsers: User[] = loadStorage(STORAGE_KEYS.USERS, localFallback(DEMO_USERS));
+let localClasses: Classroom[] = loadStorage(STORAGE_KEYS.CLASSES, localFallback(INITIAL_CLASSES));
+let localDepartments: Department[] = loadStorage(STORAGE_KEYS.DEPARTMENTS, localFallback(INITIAL_DEPARTMENTS));
+let localAssessments: Assessment[] = loadStorage(STORAGE_KEYS.ASSESSMENTS, localFallback(INITIAL_ASSESSMENTS));
+let localQuestions: Question[] = loadStorage(STORAGE_KEYS.QUESTIONS, localFallback(INITIAL_QUESTIONS));
+let localSessions: CandidateSession[] = loadStorage(STORAGE_KEYS.SESSIONS, localFallback(INITIAL_SESSIONS));
+let localSubmissions: Submission[] = loadStorage(STORAGE_KEYS.SUBMISSIONS, localFallback(INITIAL_SUBMISSIONS));
 let localResults: Result[] = loadStorage(STORAGE_KEYS.RESULTS, []);
 let localAuditLogs: AuditLog[] = loadStorage(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
 let localFacultyReviews: FacultyReview[] = loadStorage(STORAGE_KEYS.FACULTY_REVIEWS, []);
@@ -436,49 +438,49 @@ export async function fetchAndSyncAllData(force: boolean = false): Promise<void>
           notify(listeners.users, localUsers);
         }
         if (Array.isArray(assessments)) {
-          localAssessments = mergeArraySmart(localAssessments, assessments);
+          localAssessments = assessments;
           saveStorage(STORAGE_KEYS.ASSESSMENTS, localAssessments);
           notify(listeners.assessments, localAssessments);
         }
         if (Array.isArray(questions)) {
-          localQuestions = mergeArraySmart(localQuestions, questions);
+          localQuestions = questions;
           saveStorage(STORAGE_KEYS.QUESTIONS, localQuestions);
           notify(listeners.questions, localQuestions);
         }
         const s = sessions || attempts;
         if (Array.isArray(s)) {
-          localSessions = mergeArraySmart(localSessions, s);
+          localSessions = s;
           saveStorage(STORAGE_KEYS.SESSIONS, localSessions);
           notify(listeners.sessions, localSessions);
           notify(listeners.attempts, localSessions as unknown as TestAttempt[]);
         }
         if (Array.isArray(submissions)) {
-          localSubmissions = mergeArraySmart(localSubmissions, submissions);
+          localSubmissions = submissions;
           saveStorage(STORAGE_KEYS.SUBMISSIONS, localSubmissions);
           notify(listeners.submissions, localSubmissions);
         }
         if (Array.isArray(results)) {
-          localResults = mergeArraySmart(localResults, results);
+          localResults = results;
           saveStorage(STORAGE_KEYS.RESULTS, localResults);
           notify(listeners.results, localResults);
         }
         if (Array.isArray(classes)) {
-          localClasses = mergeArraySmart(localClasses, classes);
+          localClasses = classes;
           saveStorage(STORAGE_KEYS.CLASSES, localClasses);
           notify(listeners.classes, localClasses);
         }
         if (Array.isArray(departments)) {
-          localDepartments = mergeArraySmart(localDepartments, departments);
+          localDepartments = departments;
           saveStorage(STORAGE_KEYS.DEPARTMENTS, localDepartments);
           notify(listeners.departments, localDepartments);
         }
         if (Array.isArray(institutions)) {
-          localInstitutions = mergeArraySmart(localInstitutions, institutions);
+          localInstitutions = institutions;
           saveStorage(STORAGE_KEYS.INSTITUTIONS, localInstitutions);
           notify(listeners.institutions, localInstitutions);
         }
         if (Array.isArray(auditLogs)) {
-          localAuditLogs = mergeArraySmart(localAuditLogs, auditLogs);
+          localAuditLogs = auditLogs;
           saveStorage(STORAGE_KEYS.AUDIT_LOGS, localAuditLogs);
           notify(listeners.auditLogs, localAuditLogs);
         }
@@ -533,44 +535,44 @@ export async function fetchAndSyncAllData(force: boolean = false): Promise<void>
           saveStorage(STORAGE_KEYS.USERS, localUsers);
           notify(listeners.users, localUsers);
         }
-        if (Array.isArray(remoteAssessments) && remoteAssessments.length > 0) {
-          localAssessments = mergeArraySmart(localAssessments, remoteAssessments.map(unpack));
+        if (Array.isArray(remoteAssessments)) {
+          localAssessments = remoteAssessments.map(unpack);
           saveStorage(STORAGE_KEYS.ASSESSMENTS, localAssessments);
           notify(listeners.assessments, localAssessments);
         }
-        if (Array.isArray(remoteQuestions) && remoteQuestions.length > 0) {
-          localQuestions = mergeArraySmart(localQuestions, remoteQuestions.map(unpack));
+        if (Array.isArray(remoteQuestions)) {
+          localQuestions = remoteQuestions.map(unpack);
           saveStorage(STORAGE_KEYS.QUESTIONS, localQuestions);
           notify(listeners.questions, localQuestions);
         }
-        if (Array.isArray(remoteSessions) && remoteSessions.length > 0) {
-          localSessions = mergeArraySmart(localSessions, remoteSessions.map(unpack));
+        if (Array.isArray(remoteSessions)) {
+          localSessions = remoteSessions.map(unpack);
           saveStorage(STORAGE_KEYS.SESSIONS, localSessions);
           notify(listeners.sessions, localSessions);
           notify(listeners.attempts, localSessions as unknown as TestAttempt[]);
         }
-        if (Array.isArray(remoteSubmissions) && remoteSubmissions.length > 0) {
-          localSubmissions = mergeArraySmart(localSubmissions, remoteSubmissions.map(unpack));
+        if (Array.isArray(remoteSubmissions)) {
+          localSubmissions = remoteSubmissions.map(unpack);
           saveStorage(STORAGE_KEYS.SUBMISSIONS, localSubmissions);
           notify(listeners.submissions, localSubmissions);
         }
-        if (Array.isArray(remoteResults) && remoteResults.length > 0) {
-          localResults = mergeArraySmart(localResults, remoteResults.map(unpack));
+        if (Array.isArray(remoteResults)) {
+          localResults = remoteResults.map(unpack);
           saveStorage(STORAGE_KEYS.RESULTS, localResults);
           notify(listeners.results, localResults);
         }
-        if (Array.isArray(remoteClasses) && remoteClasses.length > 0) {
-          localClasses = mergeArraySmart(localClasses, remoteClasses.map(unpack));
+        if (Array.isArray(remoteClasses)) {
+          localClasses = remoteClasses.map(unpack);
           saveStorage(STORAGE_KEYS.CLASSES, localClasses);
           notify(listeners.classes, localClasses);
         }
-        if (Array.isArray(remoteDepartments) && remoteDepartments.length > 0) {
-          localDepartments = mergeArraySmart(localDepartments, remoteDepartments.map(unpack));
+        if (Array.isArray(remoteDepartments)) {
+          localDepartments = remoteDepartments.map(unpack);
           saveStorage(STORAGE_KEYS.DEPARTMENTS, localDepartments);
           notify(listeners.departments, localDepartments);
         }
-        if (Array.isArray(remoteInstitutions) && remoteInstitutions.length > 0) {
-          localInstitutions = mergeArraySmart(localInstitutions, remoteInstitutions.map(unpack));
+        if (Array.isArray(remoteInstitutions)) {
+          localInstitutions = remoteInstitutions.map(unpack);
           saveStorage(STORAGE_KEYS.INSTITUTIONS, localInstitutions);
           notify(listeners.institutions, localInstitutions);
         }
@@ -1608,31 +1610,6 @@ export async function saveInstitutionToFirestore(inst: Institution): Promise<voi
   notify(listeners.institutions, localInstitutions);
 
   persistToBackend('institutions', inst.id, cleaned);
-}
-
-// SEED DATABASE
-export async function seedDatabaseIfEmpty(): Promise<boolean> {
-  if (localAssessments.length === 0) {
-    localAssessments = [...INITIAL_ASSESSMENTS];
-    saveStorage(STORAGE_KEYS.ASSESSMENTS, localAssessments);
-  }
-  if (localQuestions.length === 0) {
-    localQuestions = [...INITIAL_QUESTIONS];
-    saveStorage(STORAGE_KEYS.QUESTIONS, localQuestions);
-  }
-  if (localClasses.length === 0) {
-    localClasses = [...INITIAL_CLASSES];
-    saveStorage(STORAGE_KEYS.CLASSES, localClasses);
-  }
-  if (localDepartments.length === 0) {
-    localDepartments = [...INITIAL_DEPARTMENTS];
-    saveStorage(STORAGE_KEYS.DEPARTMENTS, localDepartments);
-  }
-  if (localInstitutions.length === 0) {
-    localInstitutions = [...INITIAL_INSTITUTIONS];
-    saveStorage(STORAGE_KEYS.INSTITUTIONS, localInstitutions);
-  }
-  return true;
 }
 
 // Backward-compatible dummy auth and db objects for any legacy references

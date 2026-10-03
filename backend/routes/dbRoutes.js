@@ -71,25 +71,73 @@ function sanitizeSavedRecord(table, record) {
   return record;
 }
 
-router.get('/all', (_req, res) => {
-  const users = memoryStore.users.map(({ password: _password, ...user }) => user);
+async function readTable(table, fallback = []) {
+  if (!isSupabaseConfigured || !supabase) return fallback;
+  const { data, error } = await supabase.from(table).select('*');
+  if (error) {
+    if (error.code !== 'PGRST205') {
+      throw error;
+    }
+    return fallback;
+  }
+  return Array.isArray(data) ? data : fallback;
+}
 
-  return sendSuccess(res, {
-    users,
-    assessments: memoryStore.tests,
-    questions: memoryStore.questions,
-    attempts: memoryStore.sessions,
-    sessions: memoryStore.sessions,
-    submissions: memoryStore.submissions,
-    results: [],
-    classes: [],
-    departments: [],
-    institutions: [],
-    auditLogs: [],
-    systemSettings: memoryStore.settings,
-    facultySettings: {},
-    studentSettings: {},
-  });
+function unpackRow(row) {
+  if (!row || typeof row !== 'object') return row;
+  return row.data && typeof row.data === 'object' ? { ...row.data, id: row.id } : row;
+}
+
+router.get('/all', async (_req, res, next) => {
+  try {
+    const [
+      usersRows,
+      assessments,
+      questions,
+      attempts,
+      submissions,
+      classes,
+      departments,
+      institutions,
+      auditLogs,
+      systemSettings,
+      facultySettings,
+      studentSettings,
+    ] = await Promise.all([
+      readTable('users', memoryStore.users),
+      readTable('assessments', memoryStore.tests),
+      readTable('questions', memoryStore.questions),
+      readTable('attempts', memoryStore.sessions),
+      readTable('submissions', memoryStore.submissions),
+      readTable('classes'),
+      readTable('departments'),
+      readTable('institutions'),
+      readTable('audit_events'),
+      readTable('system_settings'),
+      readTable('faculty_settings'),
+      readTable('student_settings'),
+    ]);
+    const users = usersRows.map(unpackRow).map(({ password: _password, ...user }) => user);
+
+    return sendSuccess(res, {
+      users,
+      assessments,
+      questions,
+      attempts,
+      sessions: attempts,
+      submissions,
+      results: [],
+      classes: classes.map(unpackRow),
+      departments: departments.map(unpackRow),
+      institutions: institutions.map(unpackRow),
+      auditLogs: auditLogs.map(unpackRow),
+      systemSettings: unpackRow(systemSettings[0]) || memoryStore.settings,
+      facultySettings: unpackRow(facultySettings[0]) || {},
+      studentSettings: unpackRow(studentSettings[0]) || {},
+    });
+  } catch (error) {
+    return next(error);
+  }
 });
 
 router.post('/save', async (req, res, next) => {

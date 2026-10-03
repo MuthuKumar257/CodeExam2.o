@@ -73,7 +73,6 @@ import {
   auth,
   db,
   ensureAuth,
-  seedDatabaseIfEmpty,
   getLocalStoredUser,
   setLocalStoredUser,
   deduplicateById,
@@ -253,10 +252,6 @@ export default function App() {
         } catch {}
       });
       unsubs = [];
-
-      try {
-        await seedDatabaseIfEmpty().catch((err) => console.warn('[App] Seeding check:', err));
-      } catch {}
 
       unsubs.push(
         subscribeUsers((data) => {

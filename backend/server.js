@@ -141,7 +141,7 @@ server.on('error', (err) => {
 
 // Start listening
 server.listen(PORT, () => {
-  logger.info(`🚀 CodeExam Server running on http://localhost:${PORT}`);
+  logger.info(`[SERVER] CodeExam server started on port ${PORT}`);
   logger.info(`🔌 WebSocket Realtime engine active on port ${PORT}`);
   logger.info(`📦 Database: ${isSupabaseConfigured ? 'Supabase PostgreSQL' : 'Resilient In-Memory Mode'}`);
 });

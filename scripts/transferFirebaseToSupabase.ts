@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { assertDestructiveOperationAllowed } from '../backend/services/databaseSafety.js';
 import { supabaseServer, isSupabaseConfigured, syncDataToSupabase } from '../server/supabaseServer';
 import {
   DEMO_USERS,
@@ -13,6 +14,7 @@ import {
 } from '../src/data/seedData';
 
 export async function runTransfer() {
+  assertDestructiveOperationAllowed('seed/transfer');
   console.log('=====================================================');
   console.log('  STARTING SEED & DATA SYNC TO SUPABASE');
   console.log('=====================================================');

@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import { logger } from '../utils/logger.js';
+import { isProduction, logDatabaseStartup } from './databaseSafety.js';
 
 dotenv.config();
 
@@ -34,6 +35,8 @@ if (isSupabaseConfigured) {
 }
 
 export const supabase = supabaseClient;
+
+logDatabaseStartup({ configured: isSupabaseConfigured, url: supabaseUrl });
 
 // Initial seed data for out-of-the-box readiness
 export const defaultUsers = [
@@ -305,10 +308,10 @@ export const defaultTests = [
 ];
 
 export const memoryStore = {
-  users: defaultUsers.filter((user) => String(user.role).toUpperCase() === 'ADMIN'),
-  questions: [],
-  testcases: [],
-  tests: [],
+  users: isProduction ? [] : defaultUsers.filter((user) => String(user.role).toUpperCase() === 'ADMIN'),
+  questions: isProduction ? [] : [...defaultQuestions],
+  testcases: isProduction ? [] : [...defaultTestcases],
+  tests: isProduction ? [] : [...defaultTests],
   sessions: [],
   submissions: [],
   settings: {
