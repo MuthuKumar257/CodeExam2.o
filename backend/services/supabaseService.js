@@ -49,6 +49,17 @@ export const defaultUsers = [
     updated_at: new Date().toISOString(),
   },
   {
+    id: 'usr-admin-cse-drngp',
+    name: 'CSE Administrator',
+    email: 'cse.admin@drngp.ac.in',
+    password: '$2a$10$wOqgD5k4j0H2N8b4w7hKz.F0eC5z0l/1yv3O0r8E6c8I9u7p1g3b2', // Admin@123
+    role: 'ADMIN',
+    department: 'Computer Science and Engineering',
+    institution_id: 'inst-01',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
     id: 'usr-faculty-01',
     name: 'Prof. Alan Turing',
     email: 'faculty@codeexam.edu',
