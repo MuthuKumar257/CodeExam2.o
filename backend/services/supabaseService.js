@@ -294,10 +294,10 @@ export const defaultTests = [
 ];
 
 export const memoryStore = {
-  users: [...defaultUsers],
-  questions: [...defaultQuestions],
-  testcases: [...defaultTestcases],
-  tests: [...defaultTests],
+  users: defaultUsers.filter((user) => String(user.role).toUpperCase() === 'ADMIN'),
+  questions: [],
+  testcases: [],
+  tests: [],
   sessions: [],
   submissions: [],
   settings: {

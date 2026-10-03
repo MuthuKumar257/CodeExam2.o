@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { memoryStore, supabase, isSupabaseConfigured } from '../services/supabaseService.js';
 import { sendError, sendSuccess } from '../utils/response.js';
 import { broadcastDatabaseUpdate } from '../websocket/testSocket.js';
+import { authenticate } from '../middleware/authMiddleware.js';
+import { requireRole } from '../middleware/roleMiddleware.js';
 
 const router = Router();
 
@@ -137,6 +139,46 @@ router.post('/save', async (req, res, next) => {
       supabaseStatus,
       supabaseWarning,
     });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.delete('/:table/:id', authenticate, requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const { table, id } = req.params;
+    const config = resolveTable(table);
+
+    if (!config || !id) {
+      return sendError(res, 'A supported table and record id are required.', 400, 'INVALID_DB_DELETE');
+    }
+
+    if (table === 'users') {
+      const user = memoryStore.users.find((record) => String(record.id) === String(id));
+      if (user?.role === 'ADMIN') {
+        return sendError(res, 'The administrator account cannot be deleted.', 403, 'ADMIN_DELETE_FORBIDDEN');
+      }
+    }
+
+    if (config.memoryKey) {
+      const records = memoryStore[config.memoryKey];
+      if (Array.isArray(records)) {
+        memoryStore[config.memoryKey] = records.filter((record) => String(record.id) !== String(id));
+      }
+    }
+
+    let supabaseWarning = null;
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from(config.supabaseTable).delete().eq('id', id);
+      if (error?.code === 'PGRST205') {
+        supabaseWarning = `Supabase table "${config.supabaseTable}" is not provisioned; deleted from backend memory only.`;
+      } else if (error) {
+        return next(error);
+      }
+    }
+
+    broadcastDatabaseUpdate({ table, id: String(id), action: 'delete' });
+    return sendSuccess(res, { id, deleted: true, supabaseWarning });
   } catch (error) {
     return next(error);
   }

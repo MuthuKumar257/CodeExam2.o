@@ -226,7 +226,6 @@ function saveStorage<T>(key: string, data: T): void {
 
 // Initial Memory Store
 let localUsers: User[] = loadStorage(STORAGE_KEYS.USERS, DEMO_USERS);
-if (localUsers.length === 0) localUsers = [...DEMO_USERS];
 let localClasses: Classroom[] = loadStorage(STORAGE_KEYS.CLASSES, INITIAL_CLASSES);
 let localDepartments: Department[] = loadStorage(STORAGE_KEYS.DEPARTMENTS, INITIAL_DEPARTMENTS);
 let localAssessments: Assessment[] = loadStorage(STORAGE_KEYS.ASSESSMENTS, INITIAL_ASSESSMENTS);
@@ -313,7 +312,6 @@ try {
         else if (data) {
           localUsers = mergeArraySmart(localUsers, Array.isArray(data) ? data : [data]);
         }
-        if (localUsers.length === 0) localUsers = [...DEMO_USERS];
         saveStorage(STORAGE_KEYS.USERS, localUsers);
         notify(listeners.users, localUsers);
       } else if (table === 'assessments') {
@@ -433,8 +431,7 @@ export async function fetchAndSyncAllData(force: boolean = false): Promise<void>
       if (json && json.success && json.data) {
         const { users, assessments, questions, attempts, sessions, submissions, results, classes, departments, institutions, auditLogs, systemSettings, facultySettings, studentSettings } = json.data;
         if (Array.isArray(users)) {
-          localUsers = mergeArraySmart(localUsers, users);
-          if (localUsers.length === 0) localUsers = [...DEMO_USERS];
+          localUsers = users;
           saveStorage(STORAGE_KEYS.USERS, localUsers);
           notify(listeners.users, localUsers);
         }
@@ -531,8 +528,8 @@ export async function fetchAndSyncAllData(force: boolean = false): Promise<void>
 
         const unpack = (row: any) => row?.data || row;
 
-        if (Array.isArray(remoteUsers) && remoteUsers.length > 0) {
-          localUsers = mergeArraySmart(localUsers, remoteUsers.map(unpack));
+        if (Array.isArray(remoteUsers)) {
+          localUsers = remoteUsers.map(unpack);
           saveStorage(STORAGE_KEYS.USERS, localUsers);
           notify(listeners.users, localUsers);
         }
@@ -1121,7 +1118,7 @@ export async function deleteUserFromFirestore(userId: string): Promise<void> {
   saveStorage(STORAGE_KEYS.USERS, localUsers);
   notify(listeners.users, localUsers);
 
-  deleteFromBackend('users', userId);
+  await deleteFromBackend('users', userId);
 }
 
 // CLASSES SUBSCRIPTION & PERSISTENCE
@@ -1615,10 +1612,6 @@ export async function saveInstitutionToFirestore(inst: Institution): Promise<voi
 
 // SEED DATABASE
 export async function seedDatabaseIfEmpty(): Promise<boolean> {
-  if (localUsers.length === 0) {
-    localUsers = [...DEMO_USERS];
-    saveStorage(STORAGE_KEYS.USERS, localUsers);
-  }
   if (localAssessments.length === 0) {
     localAssessments = [...INITIAL_ASSESSMENTS];
     saveStorage(STORAGE_KEYS.ASSESSMENTS, localAssessments);
