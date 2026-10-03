@@ -293,7 +293,8 @@ async function deleteFromBackend(table: string, id: string) {
 // Real-time socket sync with backend database
 try {
   if (typeof window !== 'undefined') {
-    const syncSocket = createSocketClient(window.location.origin, {
+    const socketUrl = (import.meta.env.VITE_SOCKET_URL || window.location.origin).trim().replace(/\/$/, '');
+    const syncSocket = createSocketClient(socketUrl, {
       transports: ['websocket', 'polling'],
     });
 

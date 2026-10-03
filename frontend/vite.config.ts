@@ -14,11 +14,11 @@ export default defineConfig(() => {
     server: {
       proxy: {
         '/api': {
-          target: 'http://localhost:5000',
+          target: 'https://codeexam2-o.onrender.com/',
           changeOrigin: true,
         },
         '/socket.io': {
-          target: 'http://localhost:5000',
+          target: 'https://codeexam2-o.onrender.com/',
           ws: true,
           changeOrigin: true,
         },

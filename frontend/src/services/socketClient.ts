@@ -1,5 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 
+const SOCKET_URL = (import.meta.env.VITE_SOCKET_URL || '').trim().replace(/\/$/, '');
+
 // Session-specific socket pool to ensure exactly ONE resilient WebSocket connection per active test session
 const sessionSockets = new Map<string, Socket>();
 
@@ -7,7 +9,7 @@ const sessionSockets = new Map<string, Socket>();
  * Creates or retrieves a resilient Socket.IO client configured for cloud proxies and high availability
  */
 export function createResilientSocket(namespace: string = '/'): Socket {
-  const socket = io(namespace, {
+  const socket = io(SOCKET_URL || namespace, {
     transports: ['polling', 'websocket'], // Start with HTTP long-polling, upgrade to WebSocket
     upgrade: true,
     rememberUpgrade: false,
