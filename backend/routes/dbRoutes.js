@@ -9,7 +9,7 @@ const router = Router();
 
 const TABLE_CONFIG = {
   users: { memoryKey: 'users', supabaseTable: 'users' },
-  assessments: { memoryKey: 'tests', supabaseTable: 'tests' },
+  assessments: { memoryKey: 'tests', supabaseTable: 'assessments' },
   questions: { memoryKey: 'questions', supabaseTable: 'questions' },
   attempts: { memoryKey: 'sessions', supabaseTable: 'attempts' },
   sessions: { memoryKey: 'sessions', supabaseTable: 'attempts' },

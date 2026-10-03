@@ -1205,7 +1205,7 @@ export async function deleteAssessmentFromFirestore(asmId: string): Promise<void
   saveStorage(STORAGE_KEYS.ASSESSMENTS, localAssessments);
   notify(listeners.assessments, localAssessments);
 
-  deleteFromBackend('assessments', asmId);
+  await deleteFromBackend('assessments', asmId);
 }
 
 export async function clearAllAssessmentsAndHistory(): Promise<boolean> {

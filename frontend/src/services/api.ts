@@ -55,8 +55,8 @@ export async function deleteResource(resource: 'users' | 'classes' | 'questions'
   if (!id || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(id)) {
     throw new Error(`Invalid ${resource.slice(0, -1)} ID.`);
   }
-  const endpoint = resource === 'users'
-    ? `/api/db/users/${encodeURIComponent(id)}`
+  const endpoint = resource === 'users' || resource === 'assessments'
+    ? `/api/db/${resource}/${encodeURIComponent(id)}`
     : `/api/${resource}/${encodeURIComponent(id)}`;
   return request<{ success: true; id: string }>(endpoint, { method: 'DELETE' });
 }
@@ -488,4 +488,3 @@ export async function adminRetryProvisioningApi(userId: string) {
     method: 'POST',
   });
 }
-
