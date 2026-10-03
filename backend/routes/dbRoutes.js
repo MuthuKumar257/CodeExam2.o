@@ -1,0 +1,145 @@
+import { Router } from 'express';
+import { memoryStore, supabase, isSupabaseConfigured } from '../services/supabaseService.js';
+import { sendError, sendSuccess } from '../utils/response.js';
+import { broadcastDatabaseUpdate } from '../websocket/testSocket.js';
+
+const router = Router();
+
+const TABLE_CONFIG = {
+  users: { memoryKey: 'users', supabaseTable: 'users' },
+  assessments: { memoryKey: 'tests', supabaseTable: 'tests' },
+  questions: { memoryKey: 'questions', supabaseTable: 'questions' },
+  attempts: { memoryKey: 'sessions', supabaseTable: 'attempts' },
+  sessions: { memoryKey: 'sessions', supabaseTable: 'attempts' },
+  submissions: { memoryKey: 'submissions', supabaseTable: 'submissions' },
+};
+
+function resolveTable(table) {
+  if (TABLE_CONFIG[table]) return TABLE_CONFIG[table];
+  if (table === 'results') return { memoryKey: null, supabaseTable: 'attempts' };
+  if (table === 'classes' || table === 'departments' || table === 'institutions') {
+    return { memoryKey: null, supabaseTable: table };
+  }
+  if (table === 'audit_logs' || table === 'auditLogs') {
+    return { memoryKey: null, supabaseTable: 'audit_logs' };
+  }
+  if (table === 'system_settings' || table === 'systemSettings') {
+    return { memoryKey: 'settings', supabaseTable: 'institutions' };
+  }
+  if (table === 'faculty_settings' || table === 'student_settings' || table === 'facultySettings' || table === 'studentSettings') {
+    return { memoryKey: null, supabaseTable: 'institutions' };
+  }
+  return null;
+}
+
+function buildSupabaseRow(table, id, data) {
+  if (table === 'results') {
+    return { id: `res-${id}`, data: { ...data, isResultRecord: true }, updated_at: new Date().toISOString() };
+  }
+  if (table.includes('settings') || table.includes('Settings')) {
+    return {
+      id: `setting-${table}`,
+      data: { settingKey: table, data, updatedAt: new Date().toISOString() },
+      updated_at: new Date().toISOString(),
+    };
+  }
+  return { ...data, id, updated_at: new Date().toISOString() };
+}
+
+function saveInMemory(table, id, data, config) {
+  if (config.memoryKey === 'settings') {
+    memoryStore.settings = { ...memoryStore.settings, ...data, updated_at: new Date().toISOString() };
+    return memoryStore.settings;
+  }
+  if (!config.memoryKey) return data;
+
+  const records = memoryStore[config.memoryKey];
+  const index = records.findIndex((record) => String(record.id) === String(id));
+  const saved = index === -1 ? { ...data, id } : { ...records[index], ...data, id };
+  if (index === -1) records.push(saved);
+  else records[index] = saved;
+  return saved;
+}
+
+function sanitizeSavedRecord(table, record) {
+  if (table === 'users' && record && typeof record === 'object') {
+    const { password: _password, ...safeRecord } = record;
+    return safeRecord;
+  }
+  return record;
+}
+
+router.get('/all', (_req, res) => {
+  const users = memoryStore.users.map(({ password: _password, ...user }) => user);
+
+  return sendSuccess(res, {
+    users,
+    assessments: memoryStore.tests,
+    questions: memoryStore.questions,
+    attempts: memoryStore.sessions,
+    sessions: memoryStore.sessions,
+    submissions: memoryStore.submissions,
+    results: [],
+    classes: [],
+    departments: [],
+    institutions: [],
+    auditLogs: [],
+    systemSettings: memoryStore.settings,
+    facultySettings: {},
+    studentSettings: {},
+  });
+});
+
+router.post('/save', async (req, res, next) => {
+  try {
+    const { table, id, data } = req.body || {};
+    const config = typeof table === 'string' ? resolveTable(table) : null;
+
+    if (!config || !id || !data || typeof data !== 'object' || Array.isArray(data)) {
+      return sendError(res, 'A supported table, record id, and object data are required.', 400, 'INVALID_DB_WRITE');
+    }
+
+    const saved = saveInMemory(table, id, data, config);
+    let supabaseStatus = null;
+    let supabaseError = null;
+    let supabaseWarning = null;
+
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase
+        .from(config.supabaseTable)
+        .upsert(buildSupabaseRow(table, id, data), { onConflict: 'id' });
+      if (error) {
+        if (error.code === 'PGRST205') {
+          supabaseStatus = 503;
+          supabaseWarning = `Supabase table "${config.supabaseTable}" is not provisioned; saved in backend memory only.`;
+        } else {
+          supabaseError = error;
+        }
+      } else {
+        supabaseStatus = 200;
+      }
+    }
+
+    if (supabaseError) {
+      return sendSuccess(res, {
+        saved: sanitizeSavedRecord(table, saved),
+        resolvedTable: config.supabaseTable,
+        supabaseStatus,
+        supabaseError,
+        supabaseWarning,
+      });
+    }
+
+    broadcastDatabaseUpdate({ table, id: String(id), data: saved, action: 'save' });
+    return sendSuccess(res, {
+      saved: sanitizeSavedRecord(table, saved),
+      resolvedTable: config.supabaseTable,
+      supabaseStatus,
+      supabaseWarning,
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+export default router;

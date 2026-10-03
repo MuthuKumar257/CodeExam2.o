@@ -1,0 +1,155 @@
+import { SubmissionService } from '../services/submissionService.js';
+import { executeCodeInSandbox } from '../services/codeRunnerService.js';
+import { executeCodeBatchInSandbox } from '../services/codeRunnerService.js';
+import { getLanguageConfig } from '../services/codeRunnerService.js';
+import { SessionService } from '../services/sessionService.js';
+import { evaluateOutput } from '../services/scoringService.js';
+import { randomUUID } from 'crypto';
+import { sendSuccess, sendError } from '../utils/response.js';
+
+export class SubmissionController {
+  static async runCode(req, res, next) {
+    try {
+      const { language, code, sourceCode, input, testCases, comparisonMode } = req.body;
+      const submittedCode = code ?? sourceCode;
+      if (!language || submittedCode === undefined) {
+        return sendError(res, 'Language and code are required.', 400, 'MISSING_FIELDS');
+      }
+      const { language: normalizedLanguage } = getLanguageConfig(language);
+
+      if (Array.isArray(testCases)) {
+        const batch = await executeCodeBatchInSandbox(normalizedLanguage, submittedCode, testCases);
+        const results = batch.results.map((result, index) => ({
+          id: testCases[index]?.id || `tc-${index}`,
+          passed: result.success && evaluateOutput(result.stdout, testCases[index]?.expectedOutput),
+          input: testCases[index]?.isPublic === false ? '[Concealed]' : testCases[index]?.input,
+          expectedOutput: testCases[index]?.isPublic === false ? '[Concealed]' : testCases[index]?.expectedOutput,
+          actualOutput: testCases[index]?.isPublic === false ? '[Concealed]' : result.stdout,
+          isPublic: testCases[index]?.isPublic !== false,
+          error: result.stderr || undefined,
+          executionTime: result.executionTime,
+        }));
+        const passed = results.filter((result) => result.passed).length;
+        const hasCompilationError = batch.results.some((result) => result.status === 'compilation_error');
+        return sendSuccess(res, {
+          status: hasCompilationError ? 'Compilation Error' : (passed === results.length ? 'Accepted' : 'Wrong Answer'),
+          language: batch.language,
+          testCasesPassed: passed,
+          totalTestCases: results.length,
+          testCaseResults: results,
+          executionTimeMs: batch.metrics.executionTime,
+          metrics: batch.metrics,
+        });
+      }
+
+      const result = await executeCodeInSandbox(normalizedLanguage, submittedCode, input || '');
+      return sendSuccess(res, result);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async submitCode(req, res, next) {
+    try {
+      const { test_id, testId, question_id, questionId, session_id, sessionId, code, sourceCode, language, student_id, studentId, submission_id, submissionId } = req.body;
+
+      const targetTestId = test_id || testId || req.body.assessmentId;
+      const targetQuestionId = question_id || questionId;
+      const targetSessionId = session_id || sessionId;
+      const targetStudentId = student_id || studentId || req.user?.id;
+      const studentName = req.user?.name || req.body.student_name || 'Student';
+
+      const submittedCode = code ?? sourceCode;
+      if (!targetTestId || !targetQuestionId || !submittedCode || !language) {
+        return sendError(res, 'Missing required fields (testId, questionId, code).', 400, 'MISSING_FIELDS');
+      }
+      const { language: normalizedLanguage } = getLanguageConfig(language);
+
+      if (!targetStudentId) {
+        return sendError(res, 'Student ID is required.', 400, 'MISSING_STUDENT_ID');
+      }
+      if (targetSessionId) {
+        const session = await SessionService.getSessionById(targetSessionId);
+        if (!session || session.student_id !== targetStudentId || session.test_id !== targetTestId) {
+          return sendError(res, 'Assessment attempt is invalid.', 409, 'INVALID_ATTEMPT');
+        }
+        if (session.end_time && Date.now() >= new Date(session.end_time).getTime()) {
+          return sendError(res, 'Assessment attempt has expired.', 409, 'ATTEMPT_EXPIRED');
+        }
+      }
+
+      const submission = await SubmissionService.submitQuestionCode({
+        studentId: targetStudentId,
+        studentName,
+        testId: targetTestId,
+        questionId: targetQuestionId,
+        sessionId: targetSessionId,
+        code: submittedCode,
+        language: normalizedLanguage,
+        submissionId: submission_id || submissionId || randomUUID(),
+      });
+
+      const execResult = {
+        status: submission.resultStatus === 'COMPILATION_ERROR'
+          ? 'Compilation Error'
+          : (submission.passed_count === submission.total_testcases ? 'Accepted' : 'Wrong Answer'),
+        testCasesPassed: submission.passed_count,
+        totalTestCases: submission.total_testcases,
+        executionTimeMs: submission.executionTime,
+        testCaseResults: submission.testcase_results.map((result) => ({
+          id: result.testcase_id,
+          passed: result.passed,
+          input: result.input,
+          expectedOutput: result.expected_output,
+          actualOutput: result.actual_output,
+          isPublic: !result.is_hidden,
+          error: result.error,
+          executionTime: result.execution_time,
+        })),
+      };
+      return sendSuccess(res, {
+        submissionId: submission.submission_id,
+        status: submission.status,
+        passedTestCases: submission.passed_count,
+        totalTestCases: submission.total_testcases,
+        marks: submission.score,
+        executionTime: submission.executionTime,
+        results: submission.testcase_results,
+        submission,
+        execResult,
+      }, 'Submission processed successfully.', 201);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async getSubmissionById(req, res, next) {
+    try {
+      const sub = await SubmissionService.getSubmissionById(req.params.id);
+      if (!sub) {
+        return sendError(res, 'Submission not found.', 404, 'NOT_FOUND');
+      }
+      return sendSuccess(res, sub);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async getTestSubmissions(req, res, next) {
+    try {
+      const list = await SubmissionService.getTestSubmissions(req.params.testId);
+      return sendSuccess(res, list);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async getStudentSubmissions(req, res, next) {
+    try {
+      const list = await SubmissionService.getStudentSubmissions(req.params.studentId, req.query.testId);
+      return sendSuccess(res, list);
+    } catch (err) {
+      next(err);
+    }
+  }
+}

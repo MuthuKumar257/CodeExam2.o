@@ -1,0 +1,280 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  ADMIN
+  FACULTY
+  CANDIDATE
+}
+
+enum QuestionType {
+  CODING
+  MCQ
+}
+
+enum QuestionDifficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum AssessmentStatus {
+  DRAFT
+  UPCOMING
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
+
+enum SessionState {
+  NOT_STARTED
+  ENVIRONMENT_CHECK
+  ACTIVE
+  PAUSED
+  SUBMITTED
+  AUTO_SUBMITTED
+  EXPIRED
+  FLAGGED
+  UNDER_REVIEW
+}
+
+enum ProctoringEventType {
+  TAB_SWITCH
+  WINDOW_BLUR
+  WINDOW_FOCUS
+  FULLSCREEN_EXIT
+  FULLSCREEN_ENTER
+  COPY
+  PASTE
+  CUT
+  RIGHT_CLICK
+  CAMERA_DISABLED
+  MIC_DISABLED
+  NO_FACE
+  MULTIPLE_FACES
+  FACE_OUT_OF_FRAME
+  WEBSOCKET_DISCONNECTED
+  SUSPICIOUS_PASTE
+}
+
+enum EventSeverity {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum ReviewStatus {
+  UNREVIEWED
+  REVIEWED
+  NEEDS_INVESTIGATION
+  FALSE_POSITIVE
+}
+
+enum RiskCategory {
+  NORMAL
+  REVIEW
+  HIGH_ATTENTION
+  MANUAL_REVIEW_REQUIRED
+}
+
+model Institution {
+  id              String       @id @default(uuid())
+  name            String
+  code            String       @unique
+  domain          String
+  createdAt       DateTime     @default(now())
+  users           User[]
+  assessments     Assessment[]
+
+  @@map("institutions")
+}
+
+model User {
+  id              String       @id @default(uuid())
+  name            String
+  email           String       @unique
+  passwordHash    String
+  role            Role         @default(CANDIDATE)
+  institutionId   String?
+  institution     Institution? @relation(fields: [institutionId], references: [id])
+  avatar          String?
+  createdAt       DateTime     @default(now())
+
+  createdAssessments Assessment[]         @relation("FacultyAssessments")
+  candidateSessions  AssessmentSession[]
+  submissions        Submission[]
+  auditLogs          AuditLog[]
+
+  @@index([email])
+  @@map("users")
+}
+
+model Question {
+  id                String             @id @default(uuid())
+  type              QuestionType       @default(CODING)
+  title             String
+  problemStatement  String
+  inputDescription  String?
+  outputDescription String?
+  constraints       String[]
+  examples          Json?
+  difficulty        QuestionDifficulty @default(EASY)
+  tags              String[]
+  points            Int                @default(20)
+  functionSignature Json?
+  mcqOptions        Json?
+  mcqExplanation    String?
+  createdAt         DateTime           @default(now())
+
+  testCases            TestCase[]
+  assessmentQuestions AssessmentQuestion[]
+  submissions          Submission[]
+
+  @@map("questions")
+}
+
+model TestCase {
+  id             String   @id @default(uuid())
+  questionId     String
+  question       Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  input          String
+  expectedOutput String
+  isPublic       Boolean  @default(true)
+  explanation    String?
+
+  @@index([questionId])
+  @@map("test_cases")
+}
+
+model Assessment {
+  id               String           @id @default(uuid())
+  title            String
+  description      String
+  instructions     String
+  durationMinutes  Int
+  startTime        DateTime
+  endTime          DateTime
+  maxAttempts      Int              @default(1)
+  passingScore     Int              @default(60)
+  institutionId    String
+  institution      Institution      @relation(fields: [institutionId], references: [id])
+  facultyId        String
+  faculty          User             @relation("FacultyAssessments", fields: [facultyId], references: [id])
+  allowedLanguages String[]
+  securitySettings Json
+  riskWeights      Json
+  status           AssessmentStatus @default(ACTIVE)
+  createdAt        DateTime         @default(now())
+
+  questions   AssessmentQuestion[]
+  sessions    AssessmentSession[]
+  submissions Submission[]
+
+  @@index([institutionId])
+  @@index([facultyId])
+  @@map("assessments")
+}
+
+model AssessmentQuestion {
+  assessmentId String
+  assessment   Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  questionId   String
+  question     Question   @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  order        Int        @default(0)
+
+  @@id([assessmentId, questionId])
+  @@map("assessment_questions")
+}
+
+model AssessmentSession {
+  id                   String            @id @default(uuid())
+  candidateId          String
+  candidate            User              @relation(fields: [candidateId], references: [id])
+  assessmentId         String
+  assessment           Assessment        @relation(fields: [assessmentId], references: [id])
+  state                SessionState      @default(NOT_STARTED)
+  currentQuestionIndex Int               @default(0)
+  startedAt            DateTime?
+  completedAt          DateTime?
+  warningsCount        Int               @default(0)
+  cameraActive         Boolean           @default(true)
+  micActive            Boolean           @default(true)
+  fullscreenActive     Boolean           @default(true)
+  connectionStatus     String            @default("CONNECTED")
+  riskScore            Int               @default(0)
+  riskCategory         RiskCategory      @default(NORMAL)
+  score                Int?
+  totalPoints          Int?
+  facultyNotes         String?
+
+  proctoringEvents ProctoringEvent[]
+
+  @@index([candidateId])
+  @@index([assessmentId])
+  @@map("assessment_sessions")
+}
+
+model ProctoringEvent {
+  id           String              @id @default(uuid())
+  candidateId  String
+  assessmentId String
+  sessionId    String
+  session      AssessmentSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  type         ProctoringEventType
+  timestamp    DateTime            @default(now())
+  severity     EventSeverity       @default(LOW)
+  metadata     Json?
+  reviewStatus ReviewStatus        @default(UNREVIEWED)
+  notes        String?
+
+  @@index([sessionId])
+  @@index([candidateId])
+  @@index([timestamp])
+  @@map("proctoring_events")
+}
+
+model Submission {
+  id              String     @id @default(uuid())
+  candidateId     String
+  candidate       User       @relation(fields: [candidateId], references: [id])
+  assessmentId    String
+  assessment      Assessment @relation(fields: [assessmentId], references: [id])
+  questionId      String
+  question        Question   @relation(fields: [questionId], references: [id])
+  language        String
+  sourceCode      String
+  status          String
+  score           Int
+  maxScore        Int
+  executionTimeMs Int
+  memoryUsageMb   Int
+  submittedAt     DateTime   @default(now())
+  testCasesPassed Int
+  totalTestCases  Int
+
+  @@index([candidateId])
+  @@index([assessmentId])
+  @@index([questionId])
+  @@map("submissions")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  userRole  Role
+  action    String
+  details   String
+  ipAddress String
+  timestamp DateTime @default(now())
+
+  @@index([userId])
+  @@index([timestamp])
+  @@map("audit_logs")
+}
