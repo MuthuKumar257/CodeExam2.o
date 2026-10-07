@@ -13,8 +13,8 @@ lives in [`backend/`](./backend).
 
 ## Local development
 
-Configure the backend by copying [`backend/.env.example`](./backend/.env.example) to
-`backend/.env` and setting `JWT_SECRET`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY`,
+Configure the backend in [`backend/.env`](./backend/.env) and set `JWT_SECRET`,
+`SUPABASE_URL`, `SUPABASE_SECRET_KEY`,
 and `SUPABASE_JWKS_URL` for a persistent deployment. Keep
 `SUPABASE_SECRET_KEY` server-only; only the publishable key may be exposed to the
 frontend.

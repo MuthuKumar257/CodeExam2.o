@@ -23,6 +23,19 @@ export {
   validateCoreRlsPolicies,
   supabaseSyncLogger,
 };
+
+type SupabaseAuthError = {
+  message?: string;
+  code?: string;
+  status?: number;
+};
+
+function getSupabaseAuthError(error: SupabaseAuthError | null | undefined): Error & SupabaseAuthError {
+  const authError = new Error(error?.message || 'Supabase authentication failed.') as Error & SupabaseAuthError;
+  authError.code = error?.code;
+  authError.status = error?.status;
+  return authError;
+}
 import {
   Assessment,
   AuditLog,
@@ -465,7 +478,7 @@ export async function fetchAndSyncAllData(force: boolean = false): Promise<void>
           notify(listeners.results, localResults);
         }
         if (Array.isArray(classes)) {
-          localClasses = classes;
+          localClasses = mergeArraySmart(localClasses, classes);
           saveStorage(STORAGE_KEYS.CLASSES, localClasses);
           notify(listeners.classes, localClasses);
         }
@@ -562,7 +575,7 @@ export async function fetchAndSyncAllData(force: boolean = false): Promise<void>
           notify(listeners.results, localResults);
         }
         if (Array.isArray(remoteClasses)) {
-          localClasses = remoteClasses.map(unpack);
+          localClasses = mergeArraySmart(localClasses, remoteClasses.map(unpack));
           saveStorage(STORAGE_KEYS.CLASSES, localClasses);
           notify(listeners.classes, localClasses);
         }
@@ -807,6 +820,7 @@ export async function ensureAuth(): Promise<User | null> {
 export async function loginWithEmailPassword(identifier: string, pass: string): Promise<User> {
   const trimmed = identifier.trim().toLowerCase();
   const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
+  let supabaseAuthError: (Error & SupabaseAuthError) | null = null;
 
   // 1. Check with Supabase Auth if identifier is a valid email
   if (isEmail && supabase) {
@@ -815,6 +829,9 @@ export async function loginWithEmailPassword(identifier: string, pass: string): 
         email: trimmed,
         password: pass,
       });
+      if (error) {
+        supabaseAuthError = getSupabaseAuthError(error);
+      }
       if (!error && data?.user) {
         let cached = localUsers.find((u) => u.id === data.user?.id || u.email?.toLowerCase() === trimmed);
         if (!cached) {
@@ -836,8 +853,10 @@ export async function loginWithEmailPassword(identifier: string, pass: string): 
           return userWithTimestamp;
         }
       }
-    } catch {
-      // Supabase Auth failed (400 or network error) - proceed to database profile lookup
+    } catch (error) {
+      supabaseAuthError = error instanceof Error
+        ? (error as Error & SupabaseAuthError)
+        : getSupabaseAuthError({ message: String(error) });
     }
   }
 
@@ -909,26 +928,15 @@ export async function loginWithEmailPassword(identifier: string, pass: string): 
       saveUserToFirestore(userToReturn).catch(() => {});
       setLocalStoredUser(userToReturn);
 
-      // In background, ensure user is registered in Supabase Auth if it was an email
-      if (supabase && isEmail && found.email) {
-        supabase.auth.signUp({
-          email: found.email,
-          password: pass,
-          options: {
-            data: {
-              name: found.name,
-              role: found.role,
-            },
-          },
-        }).catch(() => {});
-      }
-
       return userToReturn;
     }
     throw new Error('Invalid password. Please check your credentials.');
   }
 
   // 6. User genuinely does not exist
+  if (supabaseAuthError) {
+    throw supabaseAuthError;
+  }
   throw new Error('No user account found with this ID or email. Please check your credentials or contact your administrator.');
 }
 
@@ -971,7 +979,7 @@ export async function registerWithEmailPassword(
   // Try Supabase Auth
   if (supabase) {
     try {
-      await supabase.auth.signUp({
+      const { error } = await supabase.auth.signUp({
         email: trimmedEmail,
         password: pass,
         options: {
@@ -981,8 +989,11 @@ export async function registerWithEmailPassword(
           },
         },
       });
-    } catch (e) {
-      // SignUp warning
+      if (error) {
+        throw getSupabaseAuthError(error);
+      }
+    } catch (error) {
+      throw error instanceof Error ? error : getSupabaseAuthError({ message: String(error) });
     }
   }
 
@@ -1141,7 +1152,7 @@ export async function saveClassToFirestore(cls: Classroom): Promise<void> {
   saveStorage(STORAGE_KEYS.CLASSES, localClasses);
   notify(listeners.classes, localClasses);
 
-  persistToBackend('classes', cls.id, cleaned);
+  await persistToBackend('classes', cls.id, cleaned);
 }
 
 export async function deleteClassFromFirestore(classId: string): Promise<void> {

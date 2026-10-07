@@ -23,11 +23,13 @@ import dbRoutes from './routes/dbRoutes.js';
 import recordingRoutes, { registerRecordingLookups } from './routes/recordingRoutes.js';
 
 import { errorMiddleware } from './middleware/errorMiddleware.js';
+import { requestContext } from './middleware/requestContext.js';
+import { rateLimit, securityHeaders } from './middleware/security.js';
 import { setupWebSocket } from './websocket/testSocket.js';
-import { isSupabaseConfigured } from './services/supabaseService.js';
+import { isSupabaseConfigured, supabase } from './services/supabaseService.js';
 import { logger } from './utils/logger.js';
 import { SessionService } from './services/sessionService.js';
-import { sendSuccess } from './utils/response.js';
+import { sendError, sendSuccess } from './utils/response.js';
 
 dotenv.config();
 
@@ -44,17 +46,47 @@ app.use(
   })
 );
 
+app.use(requestContext);
+app.use(securityHeaders);
+app.use(rateLimit);
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 
 // Health and server-time endpoints
 app.get(['/api/health', '/health'], (_req, res) => {
-  return sendSuccess(res, {
+  return res.status(200).json({
+    success: true,
     status: 'healthy',
+    service: 'CodeExam Backend',
     supabase_configured: isSupabaseConfigured,
     uptime_seconds: process.uptime(),
     server_time: new Date().toISOString(),
   });
+});
+
+app.get('/api/health/database', async (req, res, next) => {
+  try {
+    if (!isSupabaseConfigured) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database is not configured.',
+        errorCode: 'DATABASE_UNAVAILABLE',
+        requestId: req.requestId,
+      });
+    }
+    const { error } = await supabase.from('users').select('id').limit(1);
+    if (error) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database is unavailable.',
+        errorCode: 'DATABASE_UNAVAILABLE',
+        requestId: req.requestId,
+      });
+    }
+    return res.json({ success: true, data: { status: 'connected' }, message: 'Database is healthy' });
+  } catch (err) {
+    return next(err);
+  }
 });
 
 app.get(['/api/server-time', '/server-time'], (_req, res) => {
@@ -88,8 +120,10 @@ app.use('/api/db', dbRoutes);
 app.use('/api/recordings', recordingRoutes);
 registerRecordingLookups(app);
 
-
 // Error Handling Middleware
+app.use((req, res) => {
+  return sendError(res, 'Route not found.', 404, 'NOT_FOUND', req.requestId);
+});
 app.use(errorMiddleware);
 
 // Create HTTP & WebSocket Server
@@ -126,9 +160,18 @@ function setupGracefulShutdown() {
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('uncaughtException', (error) => {
+    logger.error('Uncaught exception:', error);
+    shutdown('UNCAUGHT_EXCEPTION');
+  });
 }
 
 setupGracefulShutdown();
+
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled promise rejection:', reason);
+});
+
 
 // Port collision error handler
 server.on('error', (err) => {

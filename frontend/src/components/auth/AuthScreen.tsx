@@ -138,6 +138,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       let msg = err?.message || 'Authentication failed. Please check your credentials.';
       if (err?.code === 'auth/operation-not-allowed' || err?.message?.includes('operation-not-allowed')) {
         msg = 'Email/Password sign-in provider is disabled in Firebase Console. Please enable Email/Password under Authentication > Sign-in method, or use Quick Demo Sign In.';
+      } else if (err?.code === 'invalid_credentials' || err?.message?.toLowerCase().includes('invalid login credentials')) {
+        msg = 'Invalid email or password. Please verify your credentials.';
+      } else if (err?.code === 'user_already_exists' || err?.message?.toLowerCase().includes('already registered')) {
+        msg = 'This email is already registered. Please sign in or use a different email.';
+      } else if (err?.code === 'email_address_invalid' || err?.message?.toLowerCase().includes('invalid email')) {
+        msg = 'Please enter a valid email address.';
+      } else if (err?.code === 'weak_password' || err?.message?.toLowerCase().includes('password should be at least')) {
+        msg = 'Password should be at least 6 characters.';
+      } else if (err?.code === 'email_not_confirmed') {
+        msg = 'Please confirm your email address before signing in.';
       } else if (err?.code === 'auth/invalid-credential' || err?.code === 'auth/wrong-password') {
         msg = 'Invalid email or password. Please verify your credentials.';
       } else if (err?.code === 'auth/user-not-found') {

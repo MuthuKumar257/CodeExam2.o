@@ -1,6 +1,7 @@
 import { auth, getLocalStoredUser } from './firebase';
 
 const API_BASE = '';
+const REQUEST_TIMEOUT_MS = 15_000;
 
 async function request<T>(path: string, options: RequestInit = {}, maxRetries: number = 2): Promise<T> {
   const token = auth.currentUser ? await auth.currentUser.getIdToken() : null;
@@ -16,8 +17,10 @@ async function request<T>(path: string, options: RequestInit = {}, maxRetries: n
 
   let attempt = 0;
   while (true) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
-      const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+      const response = await fetch(`${API_BASE}${path}`, { ...options, headers, signal: options.signal || controller.signal });
       if (!response.ok) {
         const isRetryable = response.status === 429 || response.status === 502 || response.status === 503 || response.status === 504;
         if (isRetryable && attempt < maxRetries) {
@@ -47,6 +50,8 @@ async function request<T>(path: string, options: RequestInit = {}, maxRetries: n
         continue;
       }
       throw err;
+    } finally {
+      clearTimeout(timeout);
     }
   }
 }
