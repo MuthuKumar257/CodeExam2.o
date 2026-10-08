@@ -21,6 +21,7 @@ import monitoringRoutes from './routes/monitoringRoutes.js';
 import settingsRoutes from './routes/settingsRoutes.js';
 import dbRoutes from './routes/dbRoutes.js';
 import recordingRoutes, { registerRecordingLookups } from './routes/recordingRoutes.js';
+import { classesRouter, departmentsRouter, institutionsRouter } from './routes/academicRoutes.js';
 
 import { errorMiddleware } from './middleware/errorMiddleware.js';
 import { requestContext } from './middleware/requestContext.js';
@@ -100,9 +101,11 @@ app.get(['/api/server-time', '/server-time'], (_req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/students', studentRoutes);
 app.use('/api/faculty', facultyRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/tests', testRoutes);
-app.use('/api/assessments', testRoutes);
+app.use(['/api/admin', '/api/admins'], adminRoutes);
+app.use('/api/classes', classesRouter);
+app.use('/api/departments', departmentsRouter);
+app.use('/api/institutions', institutionsRouter);
+app.use(['/api/tests', '/api/assessments'], testRoutes);
 setInterval(() => {
   SessionService.expireDueSessions().catch((err) => logger.error('Assessment expiration worker failed:', err));
 }, 1000);
@@ -110,7 +113,7 @@ app.use('/api/questions', questionRoutes);
 app.use('/api/testcases', testcaseRoutes);
 app.use('/api/code', codeRoutes);
 app.use('/api/submissions', submissionRoutes);
-app.use(['/api/test-sessions', '/api/sessions'], sessionRoutes);
+app.use(['/api/attempts', '/api/test-sessions', '/api/sessions'], sessionRoutes);
 app.use('/api/rankings', rankingRoutes);
 app.use('/api/history', historyRoutes);
 app.use('/api/reports', reportRoutes);

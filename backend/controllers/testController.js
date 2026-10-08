@@ -1,15 +1,15 @@
 import { TestService } from '../services/testService.js';
 import { SessionService } from '../services/sessionService.js';
-import { sendSuccess, sendError } from '../utils/response.js';
+import { sendSuccess, sendPaginated, sendError } from '../utils/response.js';
 
 export class TestController {
   static async getTests(req, res, next) {
     try {
-      const { facultyId, status } = req.query;
-      const tests = await TestService.listTests({ facultyId, status });
-      return sendSuccess(res, tests);
+      const { facultyId, status, page = 1, limit = 50 } = req.query;
+      const result = await TestService.listTests({ facultyId, status, page, limit });
+      return sendPaginated(res, result.data, result.pagination, 'Tests retrieved successfully.');
     } catch (err) {
-      next(err);
+      return sendError(res, 'Unable to fetch data from the database.', 500, 'DATABASE_FETCH_FAILED', req.requestId);
     }
   }
 

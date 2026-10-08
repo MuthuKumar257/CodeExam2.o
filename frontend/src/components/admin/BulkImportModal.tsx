@@ -244,8 +244,8 @@ Dr. John von Neumann, neumann@university.edu, EMP-103, Electronics & Communicati
       const rec = validRecords[i];
       try {
         const userData: Partial<User> = {
-          name: rec.name,
-          email: rec.email,
+          name: rec.name.trim(),
+          email: rec.email.trim().toLowerCase(),
           role: isStudent ? 'CANDIDATE' : 'FACULTY',
           department: rec.department || 'Computer Science & Engineering',
           password: defaultPassword,

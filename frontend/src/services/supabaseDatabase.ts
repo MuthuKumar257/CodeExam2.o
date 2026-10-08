@@ -429,180 +429,223 @@ try {
   console.warn('[Realtime Socket Sync Init Warn]:', e);
 }
 
-// Full bidirectional sync with backend server & Supabase
-let isSyncingAllData = false;
-let lastSyncTimestamp = 0;
+let isAssessmentActiveFlag = false;
 
-export async function fetchAndSyncAllData(force: boolean = false): Promise<void> {
-  const now = Date.now();
-  if (!force && (isSyncingAllData || now - lastSyncTimestamp < 4000)) {
-    return;
-  }
-  isSyncingAllData = true;
-  lastSyncTimestamp = now;
-
-  try {
-    const res = await fetch('/api/db/all').catch(() => null);
-    if (res && res.ok) {
-      const json = await res.json().catch(() => null);
-      if (json && json.success && json.data) {
-        const { users, assessments, questions, attempts, sessions, submissions, results, classes, departments, institutions, auditLogs, systemSettings, facultySettings, studentSettings } = json.data;
-        if (Array.isArray(users)) {
-          localUsers = deduplicateById(users.filter((user) => user && user.id));
-          saveStorage(STORAGE_KEYS.USERS, localUsers);
-          notify(listeners.users, localUsers);
-        }
-        if (Array.isArray(assessments)) {
-          localAssessments = deduplicateById(assessments.filter((assessment) => assessment && assessment.id))
-            .filter((assessment) => !LEGACY_DEMO_ASSESSMENT_IDS.has(assessment.id));
-          saveStorage(STORAGE_KEYS.ASSESSMENTS, localAssessments);
-          notify(listeners.assessments, localAssessments);
-        }
-        if (Array.isArray(questions)) {
-          localQuestions = questions;
-          saveStorage(STORAGE_KEYS.QUESTIONS, localQuestions);
-          notify(listeners.questions, localQuestions);
-        }
-        const s = sessions || attempts;
-        if (Array.isArray(s)) {
-          localSessions = s;
-          saveStorage(STORAGE_KEYS.SESSIONS, localSessions);
-          notify(listeners.sessions, localSessions);
-          notify(listeners.attempts, localSessions as unknown as TestAttempt[]);
-        }
-        if (Array.isArray(submissions)) {
-          localSubmissions = submissions;
-          saveStorage(STORAGE_KEYS.SUBMISSIONS, localSubmissions);
-          notify(listeners.submissions, localSubmissions);
-        }
-        if (Array.isArray(results)) {
-          localResults = results;
-          saveStorage(STORAGE_KEYS.RESULTS, localResults);
-          notify(listeners.results, localResults);
-        }
-        if (Array.isArray(classes)) {
-          localClasses = mergeArraySmart(localClasses, classes);
-          saveStorage(STORAGE_KEYS.CLASSES, localClasses);
-          notify(listeners.classes, localClasses);
-        }
-        if (Array.isArray(departments)) {
-          localDepartments = departments;
-          saveStorage(STORAGE_KEYS.DEPARTMENTS, localDepartments);
-          notify(listeners.departments, localDepartments);
-        }
-        if (Array.isArray(institutions)) {
-          localInstitutions = institutions;
-          saveStorage(STORAGE_KEYS.INSTITUTIONS, localInstitutions);
-          notify(listeners.institutions, localInstitutions);
-        }
-        if (Array.isArray(auditLogs)) {
-          localAuditLogs = auditLogs;
-          saveStorage(STORAGE_KEYS.AUDIT_LOGS, localAuditLogs);
-          notify(listeners.auditLogs, localAuditLogs);
-        }
-        if (systemSettings) {
-          localSystemSettings = cleanObject(systemSettings);
-          saveStorage(STORAGE_KEYS.SYSTEM_SETTINGS, localSystemSettings);
-          notify(listeners.systemSettings, localSystemSettings);
-        }
-        if (facultySettings) {
-          localFacultySettings = cleanObject(facultySettings);
-          saveStorage(STORAGE_KEYS.FACULTY_SETTINGS, localFacultySettings);
-          notify(listeners.facultySettings, localFacultySettings);
-        }
-        if (studentSettings) {
-          localStudentSettings = cleanObject(studentSettings);
-          saveStorage(STORAGE_KEYS.STUDENT_SETTINGS, localStudentSettings);
-          notify(listeners.studentSettings, localStudentSettings);
-        }
-        return; // successfully synced via Express API
-      }
+export function setAssessmentActiveState(active: boolean): void {
+  isAssessmentActiveFlag = active;
+  if (typeof window !== 'undefined') {
+    if (active) {
+      sessionStorage.setItem('codeexam_active_assessment_active', 'true');
+    } else {
+      sessionStorage.removeItem('codeexam_active_assessment_active');
     }
+  }
+}
 
-    // Direct Supabase fallback (e.g. on Vercel deployment where /api/db/all is not hosted on Express)
-    if (supabase) {
-      try {
-        const [
-          { data: remoteUsers },
-          { data: remoteAssessments },
-          { data: remoteQuestions },
-          { data: remoteSessions },
-          { data: remoteSubmissions },
-          { data: remoteResults },
-          { data: remoteClasses },
-          { data: remoteDepartments },
-          { data: remoteInstitutions },
-        ] = await Promise.all([
-          supabase.from('users').select('*').limit(500),
-          supabase.from('assessments').select('*').limit(200),
-          supabase.from('questions').select('*').limit(500),
-          supabase.from('attempts').select('*').limit(500),
-          supabase.from('submissions').select('*').limit(500),
-          supabase.from('results').select('*').limit(500),
-          supabase.from('classes').select('*').limit(100),
-          supabase.from('departments').select('*').limit(50),
-          supabase.from('institutions').select('*').limit(20),
-        ]);
+export function isAssessmentActive(): boolean {
+  if (isAssessmentActiveFlag) return true;
+  if (typeof window !== 'undefined') {
+    return sessionStorage.getItem('codeexam_active_assessment_active') === 'true';
+  }
+  return false;
+}
 
-        const unpack = (row: any) => row?.data || row;
+// Modular database fetching helpers to prevent monolithic /api/db/all loads
+let isFetchingUsers = false;
+let isFetchingClasses = false;
+let isFetchingDepartments = false;
+let isFetchingInstitutions = false;
+let isFetchingAssessments = false;
+let isFetchingQuestions = false;
+let isFetchingSessions = false;
+let isFetchingSubmissions = false;
 
-        if (Array.isArray(remoteUsers)) {
-          localUsers = deduplicateById(remoteUsers.map(unpack).filter((user) => user && user.id));
-          saveStorage(STORAGE_KEYS.USERS, localUsers);
-          notify(listeners.users, localUsers);
-        }
-        if (Array.isArray(remoteAssessments)) {
-          localAssessments = remoteAssessments
-            .map(unpack)
-            .filter((assessment) => !LEGACY_DEMO_ASSESSMENT_IDS.has(assessment.id));
-          saveStorage(STORAGE_KEYS.ASSESSMENTS, localAssessments);
-          notify(listeners.assessments, localAssessments);
-        }
-        if (Array.isArray(remoteQuestions)) {
-          localQuestions = remoteQuestions.map(unpack);
-          saveStorage(STORAGE_KEYS.QUESTIONS, localQuestions);
-          notify(listeners.questions, localQuestions);
-        }
-        if (Array.isArray(remoteSessions)) {
-          localSessions = remoteSessions.map(unpack);
-          saveStorage(STORAGE_KEYS.SESSIONS, localSessions);
-          notify(listeners.sessions, localSessions);
-          notify(listeners.attempts, localSessions as unknown as TestAttempt[]);
-        }
-        if (Array.isArray(remoteSubmissions)) {
-          localSubmissions = remoteSubmissions.map(unpack);
-          saveStorage(STORAGE_KEYS.SUBMISSIONS, localSubmissions);
-          notify(listeners.submissions, localSubmissions);
-        }
-        if (Array.isArray(remoteResults)) {
-          localResults = remoteResults.map(unpack);
-          saveStorage(STORAGE_KEYS.RESULTS, localResults);
-          notify(listeners.results, localResults);
-        }
-        if (Array.isArray(remoteClasses)) {
-          localClasses = mergeArraySmart(localClasses, remoteClasses.map(unpack));
-          saveStorage(STORAGE_KEYS.CLASSES, localClasses);
-          notify(listeners.classes, localClasses);
-        }
-        if (Array.isArray(remoteDepartments)) {
-          localDepartments = remoteDepartments.map(unpack);
-          saveStorage(STORAGE_KEYS.DEPARTMENTS, localDepartments);
-          notify(listeners.departments, localDepartments);
-        }
-        if (Array.isArray(remoteInstitutions)) {
-          localInstitutions = remoteInstitutions.map(unpack);
-          saveStorage(STORAGE_KEYS.INSTITUTIONS, localInstitutions);
-          notify(listeners.institutions, localInstitutions);
-        }
-      } catch (sbErr) {
-        console.debug('[Supabase Direct Sync Error]:', sbErr);
-      }
+export async function fetchModularStudents(): Promise<void> {
+  if (isAssessmentActive() || isFetchingUsers) return;
+  isFetchingUsers = true;
+  try {
+    const res = await fetch('/api/students?limit=100');
+    if (!res.ok) {
+      console.warn('[Modular Fetch Error]: /api/students returned status', res.status);
+      return;
+    }
+    const json = await res.json();
+    if (json.success && Array.isArray(json.data)) {
+      localUsers = mergeArraySmart(localUsers, json.data);
+      saveStorage(STORAGE_KEYS.USERS, localUsers);
+      notify(listeners.users, localUsers);
     }
   } catch (err) {
-    console.warn('[Sync Error]:', err);
+    console.warn('[Modular Fetch Exception]: /api/students failed', err);
   } finally {
-    isSyncingAllData = false;
+    isFetchingUsers = false;
   }
+}
+
+export async function fetchModularFaculty(): Promise<void> {
+  if (isAssessmentActive()) return;
+  try {
+    const res = await fetch('/api/faculty?limit=100');
+    if (!res.ok) return;
+    const json = await res.json();
+    if (json.success && Array.isArray(json.data)) {
+      localUsers = mergeArraySmart(localUsers, json.data);
+      saveStorage(STORAGE_KEYS.USERS, localUsers);
+      notify(listeners.users, localUsers);
+    }
+  } catch (err) {
+    console.warn('[Modular Fetch Exception]: /api/faculty failed', err);
+  }
+}
+
+export async function fetchModularClasses(): Promise<void> {
+  if (isAssessmentActive() || isFetchingClasses) return;
+  isFetchingClasses = true;
+  try {
+    const res = await fetch('/api/classes?limit=100');
+    if (!res.ok) return;
+    const json = await res.json();
+    if (json.success && Array.isArray(json.data)) {
+      localClasses = mergeArraySmart(localClasses, json.data);
+      saveStorage(STORAGE_KEYS.CLASSES, localClasses);
+      notify(listeners.classes, localClasses);
+    }
+  } catch (err) {
+    console.warn('[Modular Fetch Exception]: /api/classes failed', err);
+  } finally {
+    isFetchingClasses = false;
+  }
+}
+
+export async function fetchModularDepartments(): Promise<void> {
+  if (isAssessmentActive() || isFetchingDepartments) return;
+  isFetchingDepartments = true;
+  try {
+    const res = await fetch('/api/departments?limit=50');
+    if (!res.ok) return;
+    const json = await res.json();
+    if (json.success && Array.isArray(json.data)) {
+      localDepartments = mergeArraySmart(localDepartments, json.data);
+      saveStorage(STORAGE_KEYS.DEPARTMENTS, localDepartments);
+      notify(listeners.departments, localDepartments);
+    }
+  } catch (err) {
+    console.warn('[Modular Fetch Exception]: /api/departments failed', err);
+  } finally {
+    isFetchingDepartments = false;
+  }
+}
+
+export async function fetchModularInstitutions(): Promise<void> {
+  if (isAssessmentActive() || isFetchingInstitutions) return;
+  isFetchingInstitutions = true;
+  try {
+    const res = await fetch('/api/institutions?limit=20');
+    if (!res.ok) return;
+    const json = await res.json();
+    if (json.success && Array.isArray(json.data)) {
+      localInstitutions = mergeArraySmart(localInstitutions, json.data);
+      saveStorage(STORAGE_KEYS.INSTITUTIONS, localInstitutions);
+      notify(listeners.institutions, localInstitutions);
+    }
+  } catch (err) {
+    console.warn('[Modular Fetch Exception]: /api/institutions failed', err);
+  } finally {
+    isFetchingInstitutions = false;
+  }
+}
+
+export async function fetchModularAssessments(): Promise<void> {
+  if (isAssessmentActive() || isFetchingAssessments) return;
+  isFetchingAssessments = true;
+  try {
+    const res = await fetch('/api/tests?limit=100');
+    if (!res.ok) return;
+    const json = await res.json();
+    if (json.success && Array.isArray(json.data)) {
+      localAssessments = mergeArraySmart(
+        localAssessments,
+        json.data.filter((a: any) => !LEGACY_DEMO_ASSESSMENT_IDS.has(a.id))
+      );
+      saveStorage(STORAGE_KEYS.ASSESSMENTS, localAssessments);
+      notify(listeners.assessments, localAssessments);
+    }
+  } catch (err) {
+    console.warn('[Modular Fetch Exception]: /api/tests failed', err);
+  } finally {
+    isFetchingAssessments = false;
+  }
+}
+
+export async function fetchModularQuestions(): Promise<void> {
+  if (isAssessmentActive() || isFetchingQuestions) return;
+  isFetchingQuestions = true;
+  try {
+    const res = await fetch('/api/questions?limit=100');
+    if (!res.ok) return;
+    const json = await res.json();
+    if (json.success && Array.isArray(json.data)) {
+      localQuestions = mergeArraySmart(localQuestions, json.data);
+      saveStorage(STORAGE_KEYS.QUESTIONS, localQuestions);
+      notify(listeners.questions, localQuestions);
+    }
+  } catch (err) {
+    console.warn('[Modular Fetch Exception]: /api/questions failed', err);
+  } finally {
+    isFetchingQuestions = false;
+  }
+}
+
+export async function fetchModularSessions(): Promise<void> {
+  if (isAssessmentActive() || isFetchingSessions) return;
+  isFetchingSessions = true;
+  try {
+    const res = await fetch('/api/attempts?limit=100');
+    if (!res.ok) return;
+    const json = await res.json();
+    if (json.success && Array.isArray(json.data)) {
+      localSessions = mergeArraySmart(localSessions, json.data);
+      saveStorage(STORAGE_KEYS.SESSIONS, localSessions);
+      notify(listeners.sessions, localSessions);
+      notify(listeners.attempts, localSessions as any);
+    }
+  } catch (err) {
+    console.warn('[Modular Fetch Exception]: /api/attempts failed', err);
+  } finally {
+    isFetchingSessions = false;
+  }
+}
+
+export async function fetchModularSubmissions(): Promise<void> {
+  if (isAssessmentActive() || isFetchingSubmissions) return;
+  isFetchingSubmissions = true;
+  try {
+    const res = await fetch('/api/submissions?limit=100');
+    if (!res.ok) return;
+    const json = await res.json();
+    if (json.success && Array.isArray(json.data)) {
+      localSubmissions = mergeArraySmart(localSubmissions, json.data);
+      saveStorage(STORAGE_KEYS.SUBMISSIONS, localSubmissions);
+      notify(listeners.submissions, localSubmissions);
+    }
+  } catch (err) {
+    console.warn('[Modular Fetch Exception]: /api/submissions failed', err);
+  } finally {
+    isFetchingSubmissions = false;
+  }
+}
+
+// Backward-compatible trigger that only runs modular fetches instead of a monolithic /api/db/all
+export async function fetchAndSyncAllData(force: boolean = false): Promise<void> {
+  if (isAssessmentActive()) return;
+  await Promise.allSettled([
+    fetchModularStudents(),
+    fetchModularFaculty(),
+    fetchModularClasses(),
+    fetchModularDepartments(),
+    fetchModularInstitutions(),
+    fetchModularAssessments(),
+  ]);
 }
 
 /**
@@ -657,26 +700,10 @@ export async function reconcileAllData(): Promise<{ success: boolean; message: s
   }
 }
 
-// Auto-run on client start and on tab refocus
+// Initial on-demand bootstrap (no periodic polling storm)
 if (typeof window !== 'undefined') {
-  fetchAndSyncAllData();
-  // Periodic background sync every 25 seconds when page is visible
-  setInterval(() => {
-    if (document.visibilityState === 'visible') {
-      fetchAndSyncAllData().catch(() => {});
-    }
-  }, 25000);
-
-  // Trigger sync on tab focus or when user returns to active tab
-  window.addEventListener('focus', () => {
-    fetchAndSyncAllData(true).catch(() => {});
-  });
-
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      fetchAndSyncAllData(true).catch(() => {});
-    }
-  });
+  // Perform a single initial load when application initializes
+  fetchAndSyncAllData().catch(() => {});
 }
 
 // Backward-compatible error types
@@ -953,6 +980,37 @@ export async function registerWithEmailPassword(
   extraFields: Record<string, any> = {}
 ): Promise<User> {
   const trimmedEmail = email.trim().toLowerCase();
+
+  // Enforce duplicate email check across local cache, demo identities, and database
+  const alreadyExistsLocally = localUsers.some(
+    (u) => (u.email || '').trim().toLowerCase() === trimmedEmail
+  ) || DEMO_USERS.some(
+    (u) => (u.email || '').trim().toLowerCase() === trimmedEmail
+  );
+
+  if (alreadyExistsLocally) {
+    const err = new Error('An account with this email address already exists.');
+    (err as any).code = 'EMAIL_ALREADY_EXISTS';
+    throw err;
+  }
+
+  if (supabase) {
+    try {
+      const { data: existingUser } = await supabase
+        .from('users')
+        .select('id')
+        .eq('email', trimmedEmail)
+        .maybeSingle();
+      if (existingUser) {
+        const err = new Error('An account with this email address already exists.');
+        (err as any).code = 'EMAIL_ALREADY_EXISTS';
+        throw err;
+      }
+    } catch (err: any) {
+      if (err?.code === 'EMAIL_ALREADY_EXISTS') throw err;
+    }
+  }
+
   const userId = `usr-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
   let avatar = '';
@@ -1117,6 +1175,10 @@ export function subscribeUsers(callback: (users: User[]) => void): Unsubscribe {
     if (listeners.users.has(callback)) callback(localUsers);
   }, 0);
 
+  // Modular fetch for users (students & faculty)
+  fetchModularStudents().catch(() => {});
+  fetchModularFaculty().catch(() => {});
+
   return () => {
     listeners.users.delete(callback);
   };
@@ -1145,6 +1207,9 @@ export function subscribeClasses(callback: (classes: Classroom[]) => void): Unsu
   setTimeout(() => {
     if (listeners.classes.has(callback)) callback(localClasses);
   }, 0);
+
+  // Modular fetch for classes
+  fetchModularClasses().catch(() => {});
 
   return () => {
     listeners.classes.delete(callback);
@@ -1175,6 +1240,9 @@ export function subscribeDepartments(callback: (depts: Department[]) => void): U
     if (listeners.departments.has(callback)) callback(localDepartments);
   }, 0);
 
+  // Modular fetch for departments
+  fetchModularDepartments().catch(() => {});
+
   return () => {
     listeners.departments.delete(callback);
   };
@@ -1203,6 +1271,9 @@ export function subscribeAssessments(callback: (assessments: Assessment[]) => vo
   setTimeout(() => {
     if (listeners.assessments.has(callback)) callback(localAssessments);
   }, 0);
+
+  // Modular fetch for assessments
+  fetchModularAssessments().catch(() => {});
 
   return () => {
     listeners.assessments.delete(callback);
@@ -1268,6 +1339,9 @@ export function subscribeQuestions(callback: (questions: Question[]) => void): U
     if (listeners.questions.has(callback)) callback(localQuestions);
   }, 0);
 
+  // Modular fetch for questions
+  fetchModularQuestions().catch(() => {});
+
   return () => {
     listeners.questions.delete(callback);
   };
@@ -1297,6 +1371,9 @@ export function subscribeSessions(callback: (sessions: CandidateSession[]) => vo
     if (listeners.sessions.has(callback)) callback(localSessions);
   }, 0);
 
+  // Modular fetch for sessions
+  fetchModularSessions().catch(() => {});
+
   return () => {
     listeners.sessions.delete(callback);
   };
@@ -1307,6 +1384,9 @@ export function subscribeAttempts(callback: (attempts: TestAttempt[]) => void): 
   setTimeout(() => {
     if (listeners.attempts.has(callback)) callback(localSessions as unknown as TestAttempt[]);
   }, 0);
+
+  // Modular fetch for sessions
+  fetchModularSessions().catch(() => {});
 
   return () => {
     listeners.attempts.delete(callback);
@@ -1374,6 +1454,9 @@ export function subscribeSubmissions(callback: (submissions: Submission[]) => vo
     if (listeners.submissions.has(callback)) callback(localSubmissions);
   }, 0);
 
+  // Modular fetch for submissions
+  fetchModularSubmissions().catch(() => {});
+
   return () => {
     listeners.submissions.delete(callback);
   };
@@ -1431,7 +1514,12 @@ export function subscribeProctoringEvents(callback: (events: ProctoringEvent[]) 
 
 export async function saveProctoringEventToFirestore(evt: ProctoringEvent): Promise<void> {
   const cleaned = cleanObject(evt);
-  localProctorEvents.push(cleaned);
+  const existingIdx = localProctorEvents.findIndex((e) => e.id === evt.id);
+  if (existingIdx >= 0) {
+    localProctorEvents[existingIdx] = cleaned;
+  } else {
+    localProctorEvents.push(cleaned);
+  }
   saveStorage(STORAGE_KEYS.PROCTOR_EVENTS, localProctorEvents);
   notify(listeners.proctorEvents, localProctorEvents);
 
@@ -1608,6 +1696,9 @@ export function subscribeInstitutions(callback: (institutions: Institution[]) =>
   setTimeout(() => {
     if (listeners.institutions.has(callback)) callback(localInstitutions);
   }, 0);
+
+  // Modular fetch for institutions
+  fetchModularInstitutions().catch(() => {});
 
   return () => {
     listeners.institutions.delete(callback);

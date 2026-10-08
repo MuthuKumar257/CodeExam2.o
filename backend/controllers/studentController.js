@@ -1,67 +1,68 @@
-import bcrypt from 'bcryptjs';
+import { UserService } from '../services/userService.js';
 import { memoryStore, supabase, isSupabaseConfigured } from '../services/supabaseService.js';
-import { sendSuccess, sendError } from '../utils/response.js';
+import { sendSuccess, sendPaginated, sendError } from '../utils/response.js';
 
 export class StudentController {
   static async getStudents(req, res, next) {
     try {
-      const students = memoryStore.users
-        .filter((u) => u.role === 'STUDENT')
-        .map(({ password: _, ...s }) => s);
-      return sendSuccess(res, students);
+      const { page = 1, limit = 50, department } = req.query;
+      const result = await UserService.listUsers({
+        role: 'STUDENT',
+        department,
+        page,
+        limit,
+      });
+      return sendPaginated(res, result.data, result.pagination, 'Students retrieved successfully.');
     } catch (err) {
-      next(err);
+      return sendError(res, 'Unable to fetch data from the database.', 500, 'DATABASE_FETCH_FAILED', req.requestId);
     }
   }
 
   static async getStudentById(req, res, next) {
     try {
-      const student = memoryStore.users.find((u) => u.id === req.params.id && u.role === 'STUDENT');
-      if (!student) {
+      const student = await UserService.findUserById(req.params.id);
+      if (!student || String(student.role).toUpperCase() !== 'STUDENT') {
         return sendError(res, 'Student not found.', 404, 'NOT_FOUND');
       }
       const { password: _, ...safeStudent } = student;
       return sendSuccess(res, safeStudent);
     } catch (err) {
-      next(err);
+      return sendError(res, 'Unable to fetch student from the database.', 500, 'DATABASE_FETCH_FAILED', req.requestId);
     }
   }
 
   static async createStudent(req, res, next) {
     try {
-      const { email, name, password, register_number, department } = req.body;
-      if (!email || !name) {
-        return sendError(res, 'Email and name are required.', 400, 'MISSING_FIELDS');
-      }
-
-      const existing = memoryStore.users.find((u) => u.email.toLowerCase() === email.toLowerCase());
-      if (existing) {
-        return sendError(res, 'User with this email already exists.', 409, 'USER_EXISTS');
-      }
-
-      const hashedPassword = await bcrypt.hash(password || 'Student@123', 10);
-      const newStudent = {
-        id: `usr-student-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      const { email, name, password, register_number, department, institution_id } = req.body;
+      const created = await UserService.createUser({
         name,
         email,
-        password: hashedPassword,
+        password,
         role: 'STUDENT',
-        register_number: register_number || `REG-${Date.now().toString().slice(-4)}`,
-        department: department || 'Computer Science',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-
-      memoryStore.users.push(newStudent);
-
-      if (isSupabaseConfigured && supabase) {
-        try {
-          await supabase.from('users').upsert(newStudent);
-        } catch {}
+        register_number,
+        department,
+        institution_id,
+      });
+      return sendSuccess(res, created, 'Student created successfully.', 201);
+    } catch (err) {
+      if (err.errorCode === 'EMAIL_ALREADY_EXISTS') {
+        return sendError(res, err.message, 409, 'EMAIL_ALREADY_EXISTS');
       }
+      if (err.errorCode === 'MISSING_FIELDS' || err.errorCode === 'INVALID_EMAIL') {
+        return sendError(res, err.message, 400, err.errorCode);
+      }
+      next(err);
+    }
+  }
 
-      const { password: _, ...safeStudent } = newStudent;
-      return sendSuccess(res, safeStudent, 'Student created successfully.', 201);
+  static async bulkImport(req, res, next) {
+    try {
+      const studentsList = Array.isArray(req.body) ? req.body : req.body.students || [];
+      if (!Array.isArray(studentsList) || studentsList.length === 0) {
+        return sendError(res, 'List of students is required for bulk import.', 400, 'MISSING_STUDENTS_LIST');
+      }
+      const result = await UserService.bulkImportStudents(studentsList);
+      return sendSuccess(res, result, 'Bulk student import processed.', 200);
     } catch (err) {
       next(err);
     }
@@ -72,6 +73,17 @@ export class StudentController {
       const index = memoryStore.users.findIndex((u) => u.id === req.params.id && u.role === 'STUDENT');
       if (index === -1) {
         return sendError(res, 'Student not found.', 404, 'NOT_FOUND');
+      }
+
+      // If email is being updated, verify it doesn't collide with existing user
+      if (req.body.email) {
+        const normalized = UserService.normalizeEmail(req.body.email);
+        const existing = await UserService.findUserByNormalizedEmail(normalized);
+        if (existing && existing.id !== req.params.id) {
+          return sendError(res, 'This email is already registered to another person.', 409, 'EMAIL_ALREADY_EXISTS');
+        }
+        req.body.email = normalized;
+        req.body.email_normalized = normalized;
       }
 
       const updated = {

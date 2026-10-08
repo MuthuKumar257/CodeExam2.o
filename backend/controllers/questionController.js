@@ -1,15 +1,16 @@
 import { QuestionService } from '../services/questionService.js';
 import { memoryStore } from '../services/supabaseService.js';
-import { sendSuccess, sendError } from '../utils/response.js';
+import { sendSuccess, sendPaginated, sendError } from '../utils/response.js';
 
 export class QuestionController {
   static async getQuestions(req, res, next) {
     try {
       const role = req.user?.role || 'STUDENT';
-      const questions = await QuestionService.listQuestions(role);
-      return sendSuccess(res, questions);
+      const { page = 1, limit = 50, difficulty } = req.query;
+      const result = await QuestionService.listQuestions(role, { page, limit, difficulty });
+      return sendPaginated(res, result.data, result.pagination, 'Questions retrieved successfully.');
     } catch (err) {
-      next(err);
+      return sendError(res, 'Unable to fetch data from the database.', 500, 'DATABASE_FETCH_FAILED', req.requestId);
     }
   }
 

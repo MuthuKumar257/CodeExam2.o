@@ -2,31 +2,67 @@ import { memoryStore, supabase, isSupabaseConfigured } from './supabaseService.j
 import { logger } from '../utils/logger.js';
 
 export class QuestionService {
-  static async listQuestions(role = 'STUDENT') {
+  static async listQuestions(role = 'STUDENT', { page = 1, limit = 50, difficulty } = {}) {
+    const p = Math.max(1, Number(page));
+    const l = Math.max(1, Number(limit));
+
     let questions = memoryStore.questions;
+    if (difficulty) {
+      questions = questions.filter((q) => q.difficulty?.toUpperCase() === difficulty.toUpperCase());
+    }
 
     if (isSupabaseConfigured && supabase) {
       try {
-        const { data, error } = await supabase.from('questions').select('*').order('created_at', { ascending: false });
-        if (!error && data && data.length > 0) {
-          questions = data;
+        let query = supabase.from('questions').select('*', { count: 'exact' }).order('created_at', { ascending: false });
+        if (difficulty) query = query.eq('difficulty', difficulty.toUpperCase());
+        const from = (p - 1) * l;
+        const to = from + l - 1;
+        const { data, count, error } = await query.range(from, to);
+        if (!error && Array.isArray(data) && data.length > 0) {
+          const total = count ?? data.length;
+          const mapped = data.map((q) => {
+            const allTestcases = memoryStore.testcases.filter((tc) => tc.question_id === q.id);
+            return {
+              ...q,
+              total_testcases: allTestcases.length,
+              public_testcases: allTestcases.filter((tc) => !tc.is_hidden),
+            };
+          });
+          return {
+            data: mapped,
+            pagination: {
+              page: p,
+              limit: l,
+              total,
+              hasMore: p * l < total,
+            },
+          };
         }
       } catch (err) {
         logger.warn('Supabase list questions fallback:', err.message);
       }
     }
 
-    return questions.map((q) => {
+    const total = questions.length;
+    const startIndex = (p - 1) * l;
+    const paginated = questions.slice(startIndex, startIndex + l).map((q) => {
       const allTestcases = memoryStore.testcases.filter((tc) => tc.question_id === q.id);
-      const testCasesCount = allTestcases.length;
-      const publicCases = allTestcases.filter((tc) => !tc.is_hidden);
-
       return {
         ...q,
-        total_testcases: testCasesCount,
-        public_testcases: publicCases,
+        total_testcases: allTestcases.length,
+        public_testcases: allTestcases.filter((tc) => !tc.is_hidden),
       };
     });
+
+    return {
+      data: paginated,
+      pagination: {
+        page: p,
+        limit: l,
+        total,
+        hasMore: p * l < total,
+      },
+    };
   }
 
   static async getQuestionById(id, role = 'STUDENT') {

@@ -1889,13 +1889,14 @@ export default function App() {
     if (!activeSession) return;
 
     try {
+      const eventId = metadata?.eventId || metadata?.id || `evt-${activeSession.id}-${type}-${Date.now()}`;
       const pEvent: ProctoringEvent = {
-        id: `evt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        id: eventId,
         sessionId: activeSession.id,
         assessmentId: activeCandidateAssessmentId,
         candidateId: currentUser.id,
         type: type as any,
-        timestamp: new Date().toISOString(),
+        timestamp: metadata?.timestamp || new Date().toISOString(),
         severity: type.includes('MALPRACTICE') || type === 'TAB_SWITCH' ? 'CRITICAL' : 'HIGH',
         reviewStatus: 'NEEDS_INVESTIGATION',
         metadata,
@@ -1919,6 +1920,7 @@ export default function App() {
           assessmentId: activeCandidateAssessmentId,
           type,
           metadata,
+          eventId,
         }),
       }).catch(() => {});
     } catch (e) {
@@ -1942,6 +1944,10 @@ export default function App() {
         (s) => s.assessmentId === activeCandidateAssessmentId && s.candidateId === currentUser.id
       );
 
+    const stableSubmissionId = activeSession?.id
+      ? `sub-${activeSession.id}-${questionId}`
+      : `sub-${currentUser.id}-${questionId}`;
+
     try {
       const res = await fetch('/api/code/submit', {
         method: 'POST',
@@ -1958,7 +1964,7 @@ export default function App() {
           language,
           sourceCode,
           sessionId: activeSession?.id,
-          submissionId: globalThis.crypto?.randomUUID?.() || `submission-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          submissionId: stableSubmissionId,
         }),
       });
 
@@ -2341,7 +2347,7 @@ export default function App() {
       setActiveCandidateSessionId(restoredAttempt.id);
     } else {
       const attemptNum = completedAttempts.length + 1;
-      const newAttemptId = authoritativeAttempt?.id || `attempt-${studentId}-${asmId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const newAttemptId = authoritativeAttempt?.id || `attempt-${studentId}-${asmId}-${attemptNum}`;
       setActiveCandidateSessionId(newAttemptId);
 
       const assignedQuestionOrder = generateCandidateQuestionOrder(

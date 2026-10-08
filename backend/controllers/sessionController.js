@@ -1,7 +1,28 @@
 import { SessionService } from '../services/sessionService.js';
-import { sendSuccess, sendError } from '../utils/response.js';
+import { memoryStore } from '../services/supabaseService.js';
+import { sendSuccess, sendPaginated, sendError } from '../utils/response.js';
 
 export class SessionController {
+  static async getAllSessions(req, res, next) {
+    try {
+      const { test_id, testId, student_id, studentId, status, page = 1, limit = 50 } = req.query;
+      const targetTest = test_id || testId;
+      const targetStudent = student_id || studentId;
+      const p = Math.max(1, Number(page));
+      const l = Math.max(1, Number(limit));
+
+      let sessions = memoryStore.sessions;
+      if (targetTest) sessions = sessions.filter((s) => s.test_id === targetTest || s.assessmentId === targetTest);
+      if (targetStudent) sessions = sessions.filter((s) => s.student_id === targetStudent || s.candidateId === targetStudent);
+      if (status) sessions = sessions.filter((s) => s.status?.toUpperCase() === status.toUpperCase());
+
+      const total = sessions.length;
+      const paginated = sessions.slice((p - 1) * l, (p - 1) * l + l);
+      return sendPaginated(res, paginated, { page: p, limit: l, total, hasMore: p * l < total }, 'Sessions retrieved successfully.');
+    } catch (err) {
+      return sendError(res, 'Unable to fetch data from the database.', 500, 'DATABASE_FETCH_FAILED', req.requestId);
+    }
+  }
   static async createOrRestoreSession(req, res, next) {
     try {
       const { test_id, testId, student_id, studentId, student_name, studentName } = req.body;

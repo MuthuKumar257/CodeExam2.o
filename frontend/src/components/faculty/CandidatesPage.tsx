@@ -264,6 +264,8 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
   const parseTextRows = (text: string) => {
     const lines = text.split(/\r?\n/);
     const parsed: ParsedStudent[] = [];
+    const existingEmails = new Set(students.map((s) => (s.email || '').toLowerCase().trim()));
+    const seenEmailsInBatch = new Set<string>();
 
     lines.forEach((line) => {
       const trimmed = line.trim();
@@ -320,21 +322,28 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
       }
 
       // Validations
+      const cleanEmail = email.trim().toLowerCase();
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      const isValidEmail = emailRegex.test(email);
+      const isValidEmail = emailRegex.test(cleanEmail);
+      const isDuplicateInFile = cleanEmail ? seenEmailsInBatch.has(cleanEmail) : false;
+      const isAlreadyInRoster = cleanEmail ? existingEmails.has(cleanEmail) : false;
+
+      let isValid = isValidEmail && name.length > 0 && !isDuplicateInFile && !isAlreadyInRoster;
+      let errorMsg: string | undefined;
+
+      if (!cleanEmail) errorMsg = 'Missing Email Address';
+      else if (!isValidEmail) errorMsg = 'Invalid Email Format';
+      else if (isDuplicateInFile) errorMsg = 'Duplicate email in file';
+      else if (isAlreadyInRoster) errorMsg = 'Email already in roster';
+      else if (!name) errorMsg = 'Missing Name';
+      else seenEmailsInBatch.add(cleanEmail);
 
       parsed.push({
-        name: name || email.split('@')[0] || 'Unknown Student',
-        email: email,
+        name: name || (cleanEmail ? cleanEmail.split('@')[0] : 'Unknown Student'),
+        email: cleanEmail,
         registerNo: regNo || undefined,
-        isValid: isValidEmail && name.length > 0,
-        errorMsg: !email
-          ? 'Missing Email Address'
-          : !isValidEmail
-          ? 'Invalid Email Format'
-          : !name
-          ? 'Missing Name'
-          : undefined,
+        isValid,
+        errorMsg,
       });
     });
 
@@ -388,8 +397,8 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
 
     try {
       await onAddStudent(selectedClass.id, {
-        name: newStudentName,
-        email: newStudentEmail,
+        name: newStudentName.trim(),
+        email: newStudentEmail.trim().toLowerCase(),
         registerNo: newStudentRegisterNo ? newStudentRegisterNo.toUpperCase().trim() : undefined,
       });
       setSuccessMsg('Student successfully registered and added to this classroom!');
@@ -400,7 +409,7 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
         setSuccessMsg('');
         setShowAddModal(false);
       }, 1500);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
     } finally {
       setIsSubmitting(false);
@@ -419,8 +428,8 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
       for (let i = 0; i < validStudents.length; i++) {
         const student = validStudents[i];
         await onAddStudent(selectedClass.id, {
-          name: student.name,
-          email: student.email,
+          name: student.name.trim(),
+          email: student.email.trim().toLowerCase(),
           registerNo: student.registerNo ? student.registerNo.toUpperCase().trim() : undefined,
         });
         setImportProgress({ current: i + 1, total: validStudents.length });

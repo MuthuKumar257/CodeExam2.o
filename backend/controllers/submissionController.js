@@ -4,10 +4,30 @@ import { executeCodeBatchInSandbox } from '../services/codeRunnerService.js';
 import { getLanguageConfig } from '../services/codeRunnerService.js';
 import { SessionService } from '../services/sessionService.js';
 import { evaluateOutput } from '../services/scoringService.js';
+import { memoryStore } from '../services/supabaseService.js';
 import { randomUUID } from 'crypto';
-import { sendSuccess, sendError } from '../utils/response.js';
+import { sendSuccess, sendPaginated, sendError } from '../utils/response.js';
 
 export class SubmissionController {
+  static async getSubmissions(req, res, next) {
+    try {
+      const { test_id, testId, student_id, studentId, page = 1, limit = 50 } = req.query;
+      const targetTest = test_id || testId;
+      const targetStudent = student_id || studentId;
+      const p = Math.max(1, Number(page));
+      const l = Math.max(1, Number(limit));
+
+      let list = memoryStore.submissions;
+      if (targetTest) list = list.filter((s) => s.test_id === targetTest || s.assessmentId === targetTest);
+      if (targetStudent) list = list.filter((s) => s.student_id === targetStudent || s.candidateId === targetStudent);
+
+      const total = list.length;
+      const paginated = list.slice((p - 1) * l, (p - 1) * l + l);
+      return sendPaginated(res, paginated, { page: p, limit: l, total, hasMore: p * l < total }, 'Submissions retrieved.');
+    } catch (err) {
+      return sendError(res, 'Unable to fetch data from the database.', 500, 'DATABASE_FETCH_FAILED', req.requestId);
+    }
+  }
   static async runCode(req, res, next) {
     try {
       const { language, code, sourceCode, input, testCases, comparisonMode } = req.body;

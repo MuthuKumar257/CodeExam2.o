@@ -15,68 +15,99 @@ export class ApiRequestError extends Error {
   }
 }
 
+const inFlightRequests = new Map<string, Promise<any>>();
+
+export function normalizeEmail(email: string): string {
+  if (!email || typeof email !== 'string') return '';
+  return email.trim().toLowerCase();
+}
+
 async function request<T>(path: string, options: RequestInit = {}, maxRetries: number = 2): Promise<T> {
-  const token = auth.currentUser ? await auth.currentUser.getIdToken() : null;
-  const headers = new Headers(options.headers);
-  if (token) headers.set('Authorization', `Bearer ${token}`);
-  const localUser = getLocalStoredUser();
-  if (localUser?.id) {
-    headers.set('x-user-id', localUser.id);
-    if (localUser.role) headers.set('x-user-role', localUser.role);
-    if (localUser.institutionId) headers.set('x-user-institution', localUser.institutionId);
-  }
-  if (options.body && !(options.body instanceof FormData)) headers.set('Content-Type', 'application/json');
-
-  let attempt = 0;
   const method = (options.method || 'GET').toUpperCase();
-  const retryableMethod = method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
-  while (true) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-    const abortHandler = () => controller.abort();
-    options.signal?.addEventListener('abort', abortHandler, { once: true });
-    try {
-      const response = await fetch(`${API_BASE}${path}`, { ...options, headers, signal: controller.signal });
-      if (!response.ok) {
-        const isRetryable = retryableMethod &&
-          (response.status === 429 || response.status === 502 || response.status === 503 || response.status === 504);
-        if (isRetryable && attempt < maxRetries) {
-          attempt++;
-          const retryAfter = response.headers.get('Retry-After');
-          const retrySeconds = retryAfter ? Number(retryAfter) : NaN;
-          const retryDate = retryAfter ? Date.parse(retryAfter) - Date.now() : NaN;
-          const delay = Number.isFinite(retrySeconds)
-            ? Math.max(0, retrySeconds * 1000)
-            : Number.isFinite(retryDate)
-              ? Math.max(0, retryDate)
-              : 250 * Math.pow(2, attempt) + Math.random() * 150;
-          await new Promise((resolve) => setTimeout(resolve, delay));
-          continue;
-        }
+  const isGet = method === 'GET';
 
-        const isJson = response.headers.get('content-type')?.includes('application/json');
-        const body = isJson ? await response.json().catch(() => null) : null;
-        throw new ApiRequestError(
-          body?.message || body?.error || 'The request could not be completed.',
-          { status: response.status, errorCode: body?.errorCode, requestId: body?.requestId }
-        );
-      }
-      const isJson = response.headers.get('content-type')?.includes('application/json');
-      if (isJson) return response.json() as Promise<T>;
-      const text = await response.text();
-      return (text ? { message: text } : {}) as Promise<T>;
-    } catch (err: any) {
-      if (retryableMethod && attempt < maxRetries && (err.name === 'TypeError' || err.name === 'AbortError')) {
-        attempt++;
-        await new Promise((resolve) => setTimeout(resolve, 300 * Math.pow(2, attempt)));
-        continue;
-      }
-      throw err;
-    } finally {
-      clearTimeout(timeout);
-      options.signal?.removeEventListener('abort', abortHandler);
+  // Deduplicate identical in-flight GET requests (prevents duplicate requests from StrictMode, re-renders, remounts)
+  if (isGet && !options.signal?.aborted) {
+    const existing = inFlightRequests.get(path);
+    if (existing) {
+      return existing as Promise<T>;
     }
   }
+
+  const exec = async (): Promise<T> => {
+    const token = auth.currentUser ? await auth.currentUser.getIdToken() : null;
+    const headers = new Headers(options.headers);
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    const localUser = getLocalStoredUser();
+    if (localUser?.id) {
+      headers.set('x-user-id', localUser.id);
+      if (localUser.role) headers.set('x-user-role', localUser.role);
+      if (localUser.institutionId) headers.set('x-user-institution', localUser.institutionId);
+    }
+    if (options.body && !(options.body instanceof FormData)) headers.set('Content-Type', 'application/json');
+
+    let attempt = 0;
+    const retryableMethod = isGet || method === 'HEAD' || method === 'OPTIONS';
+    while (true) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      const abortHandler = () => controller.abort();
+      options.signal?.addEventListener('abort', abortHandler, { once: true });
+      try {
+        const response = await fetch(`${API_BASE}${path}`, { ...options, headers, signal: controller.signal });
+        if (!response.ok) {
+          const isRetryable = retryableMethod &&
+            (response.status === 429 || response.status === 502 || response.status === 503 || response.status === 504);
+          if (isRetryable && attempt < maxRetries) {
+            attempt++;
+            const retryAfter = response.headers.get('Retry-After');
+            const retrySeconds = retryAfter ? Number(retryAfter) : NaN;
+            const retryDate = retryAfter ? Date.parse(retryAfter) - Date.now() : NaN;
+            const delay = Number.isFinite(retrySeconds)
+              ? Math.max(0, retrySeconds * 1000)
+              : Number.isFinite(retryDate)
+                ? Math.max(0, retryDate)
+                : 250 * Math.pow(2, attempt) + Math.random() * 150;
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            continue;
+          }
+
+          const isJson = response.headers.get('content-type')?.includes('application/json');
+          const body = isJson ? await response.json().catch(() => null) : null;
+          const errorCode = body?.error?.code || body?.errorCode || 'REQUEST_FAILED';
+          const errorMessage = body?.error?.message || body?.message || body?.error || 'The request could not be completed.';
+          throw new ApiRequestError(
+            errorMessage,
+            { status: response.status, errorCode, requestId: body?.requestId }
+          );
+        }
+        const isJson = response.headers.get('content-type')?.includes('application/json');
+        if (isJson) return response.json() as Promise<T>;
+        const text = await response.text();
+        return (text ? { message: text } : {}) as Promise<T>;
+      } catch (err: any) {
+        if (retryableMethod && attempt < maxRetries && (err.name === 'TypeError' || err.name === 'AbortError')) {
+          attempt++;
+          await new Promise((resolve) => setTimeout(resolve, 300 * Math.pow(2, attempt)));
+          continue;
+        }
+        throw err;
+      } finally {
+        clearTimeout(timeout);
+        options.signal?.removeEventListener('abort', abortHandler);
+      }
+    }
+  };
+
+  if (isGet) {
+    const promise = exec().finally(() => {
+      inFlightRequests.delete(path);
+    });
+    inFlightRequests.set(path, promise);
+    return promise;
+  }
+
+  return exec();
 }
 
 
@@ -139,7 +170,7 @@ export function saveBlob(blob: Blob, fileName: string) {
   URL.revokeObjectURL(url);
 }
 
-import { ScreenRecording, RecordingTimelineEvent } from '../types';
+import { ScreenRecording, RecordingTimelineEvent, User, Classroom, Department, Institution, Assessment, Question, TestAttempt, Submission } from '../types';
 export type { RecordingTimelineEvent };
 
 export async function uploadRecordingApi(
@@ -517,5 +548,167 @@ export async function adminForcePasswordResetApi(userId: string) {
 export async function adminRetryProvisioningApi(userId: string) {
   return request<any>(`/api/admin/users/${encodeURIComponent(userId)}/retry-provisioning`, {
     method: 'POST',
+  });
+}
+
+/**
+ * Modular Database Fetching APIs with Pagination & In-Flight Deduplication
+ */
+export interface PaginationInfo {
+  page: number;
+  limit: number;
+  total: number;
+  hasMore: boolean;
+}
+
+export interface PaginatedResponse<T> {
+  success: boolean;
+  data: T[];
+  pagination: PaginationInfo;
+  message?: string;
+}
+
+// 1. Students (/api/students)
+export async function fetchStudentsApi(params: { page?: number; limit?: number; department?: string; signal?: AbortSignal } = {}): Promise<PaginatedResponse<User>> {
+  const query = new URLSearchParams();
+  if (params.page) query.set('page', String(params.page));
+  if (params.limit) query.set('limit', String(params.limit));
+  if (params.department) query.set('department', params.department);
+  const qStr = query.toString();
+  return request<PaginatedResponse<User>>(`/api/students${qStr ? `?${qStr}` : ''}`, { signal: params.signal });
+}
+
+// 2. Faculty (/api/faculty)
+export async function fetchFacultyApi(params: { page?: number; limit?: number; department?: string; signal?: AbortSignal } = {}): Promise<PaginatedResponse<User>> {
+  const query = new URLSearchParams();
+  if (params.page) query.set('page', String(params.page));
+  if (params.limit) query.set('limit', String(params.limit));
+  if (params.department) query.set('department', params.department);
+  const qStr = query.toString();
+  return request<PaginatedResponse<User>>(`/api/faculty${qStr ? `?${qStr}` : ''}`, { signal: params.signal });
+}
+
+// 3. Admins (/api/admins)
+export async function fetchAdminsApi(params: { page?: number; limit?: number; signal?: AbortSignal } = {}): Promise<PaginatedResponse<User>> {
+  const query = new URLSearchParams();
+  if (params.page) query.set('page', String(params.page));
+  if (params.limit) query.set('limit', String(params.limit));
+  const qStr = query.toString();
+  return request<PaginatedResponse<User>>(`/api/admins${qStr ? `?${qStr}` : ''}`, { signal: params.signal });
+}
+
+// 4. Classes (/api/classes)
+export async function fetchClassesApi(params: { page?: number; limit?: number; department?: string; signal?: AbortSignal } = {}): Promise<PaginatedResponse<Classroom>> {
+  const query = new URLSearchParams();
+  if (params.page) query.set('page', String(params.page));
+  if (params.limit) query.set('limit', String(params.limit));
+  if (params.department) query.set('department', params.department);
+  const qStr = query.toString();
+  return request<PaginatedResponse<Classroom>>(`/api/classes${qStr ? `?${qStr}` : ''}`, { signal: params.signal });
+}
+
+// 5. Departments (/api/departments)
+export async function fetchDepartmentsApi(params: { page?: number; limit?: number; signal?: AbortSignal } = {}): Promise<PaginatedResponse<Department>> {
+  const query = new URLSearchParams();
+  if (params.page) query.set('page', String(params.page));
+  if (params.limit) query.set('limit', String(params.limit));
+  const qStr = query.toString();
+  return request<PaginatedResponse<Department>>(`/api/departments${qStr ? `?${qStr}` : ''}`, { signal: params.signal });
+}
+
+// 6. Institutions (/api/institutions)
+export async function fetchInstitutionsApi(params: { page?: number; limit?: number; signal?: AbortSignal } = {}): Promise<PaginatedResponse<Institution>> {
+  const query = new URLSearchParams();
+  if (params.page) query.set('page', String(params.page));
+  if (params.limit) query.set('limit', String(params.limit));
+  const qStr = query.toString();
+  return request<PaginatedResponse<Institution>>(`/api/institutions${qStr ? `?${qStr}` : ''}`, { signal: params.signal });
+}
+
+// 7. Tests (/api/tests)
+export async function fetchTestsApi(params: { page?: number; limit?: number; facultyId?: string; status?: string; signal?: AbortSignal } = {}): Promise<PaginatedResponse<Assessment>> {
+  const query = new URLSearchParams();
+  if (params.page) query.set('page', String(params.page));
+  if (params.limit) query.set('limit', String(params.limit));
+  if (params.facultyId) query.set('facultyId', params.facultyId);
+  if (params.status) query.set('status', params.status);
+  const qStr = query.toString();
+  return request<PaginatedResponse<Assessment>>(`/api/tests${qStr ? `?${qStr}` : ''}`, { signal: params.signal });
+}
+
+// 8. Questions (/api/questions)
+export async function fetchQuestionsApi(params: { page?: number; limit?: number; difficulty?: string; signal?: AbortSignal } = {}): Promise<PaginatedResponse<Question>> {
+  const query = new URLSearchParams();
+  if (params.page) query.set('page', String(params.page));
+  if (params.limit) query.set('limit', String(params.limit));
+  if (params.difficulty) query.set('difficulty', params.difficulty);
+  const qStr = query.toString();
+  return request<PaginatedResponse<Question>>(`/api/questions${qStr ? `?${qStr}` : ''}`, { signal: params.signal });
+}
+
+// 9. Attempts (/api/attempts)
+export async function fetchAttemptsApi(params: { page?: number; limit?: number; testId?: string; studentId?: string; status?: string; signal?: AbortSignal } = {}): Promise<PaginatedResponse<TestAttempt>> {
+  const query = new URLSearchParams();
+  if (params.page) query.set('page', String(params.page));
+  if (params.limit) query.set('limit', String(params.limit));
+  if (params.testId) query.set('testId', params.testId);
+  if (params.studentId) query.set('studentId', params.studentId);
+  if (params.status) query.set('status', params.status);
+  const qStr = query.toString();
+  return request<PaginatedResponse<TestAttempt>>(`/api/attempts${qStr ? `?${qStr}` : ''}`, { signal: params.signal });
+}
+
+// 10. Submissions (/api/submissions)
+export async function fetchSubmissionsApi(params: { page?: number; limit?: number; testId?: string; studentId?: string; signal?: AbortSignal } = {}): Promise<PaginatedResponse<Submission>> {
+  const query = new URLSearchParams();
+  if (params.page) query.set('page', String(params.page));
+  if (params.limit) query.set('limit', String(params.limit));
+  if (params.testId) query.set('testId', params.testId);
+  if (params.studentId) query.set('studentId', params.studentId);
+  const qStr = query.toString();
+  return request<PaginatedResponse<Submission>>(`/api/submissions${qStr ? `?${qStr}` : ''}`, { signal: params.signal });
+}
+
+// 11. Rankings (/api/rankings)
+export async function fetchRankingsApi(params: { testId?: string; page?: number; limit?: number; signal?: AbortSignal } = {}): Promise<PaginatedResponse<any>> {
+  const query = new URLSearchParams();
+  if (params.page) query.set('page', String(params.page));
+  if (params.limit) query.set('limit', String(params.limit));
+  const qStr = query.toString();
+  const endpoint = params.testId ? `/api/rankings/${encodeURIComponent(params.testId)}` : '/api/rankings';
+  return request<PaginatedResponse<any>>(`${endpoint}${qStr ? `?${qStr}` : ''}`, { signal: params.signal });
+}
+
+// 12. Reports (/api/reports)
+export async function fetchReportsApi(params: { page?: number; limit?: number; signal?: AbortSignal } = {}): Promise<PaginatedResponse<any>> {
+  const query = new URLSearchParams();
+  if (params.page) query.set('page', String(params.page));
+  if (params.limit) query.set('limit', String(params.limit));
+  const qStr = query.toString();
+  return request<PaginatedResponse<any>>(`/api/reports${qStr ? `?${qStr}` : ''}`, { signal: params.signal });
+}
+
+// Bulk Student Import (/api/students/bulk-import)
+export async function bulkImportStudentsApi(students: Array<{
+  name: string;
+  email: string;
+  registerNumber?: string;
+  department?: string;
+  password?: string;
+}>): Promise<{
+  success: boolean;
+  data: {
+    importedCount: number;
+    skippedCount: number;
+    duplicatesInFile: number;
+    duplicatesInDatabase: number;
+    skippedEmails: string[];
+    importedStudents: any[];
+  };
+  message: string;
+}> {
+  return request('/api/students/bulk-import', {
+    method: 'POST',
+    body: JSON.stringify({ students }),
   });
 }

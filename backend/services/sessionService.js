@@ -23,7 +23,18 @@ export class SessionService {
   }
 
   static async getSessionById(sessionId) {
-    const session = memoryStore.sessions.find((s) => s.id === sessionId);
+    let session = memoryStore.sessions.find((s) => s.id === sessionId);
+    if (!session && isSupabaseConfigured && supabase) {
+      try {
+        const { data, error } = await supabase.from('sessions').select('*').eq('id', sessionId).maybeSingle();
+        if (!error && data) {
+          session = data;
+          memoryStore.sessions.push(session);
+        }
+      } catch (err) {
+        logger.warn('Supabase getSessionById error:', err.message);
+      }
+    }
     if (!session) return null;
 
     const remainingTime = this.calculateRemainingSeconds(session.end_time);
@@ -42,7 +53,16 @@ export class SessionService {
   }
 
   static async startOrRestoreSession(testId, studentId, studentName = 'Student') {
-    const test = memoryStore.tests.find((t) => t.id === testId && !t.is_deleted);
+    let test = memoryStore.tests.find((t) => t.id === testId && !t.is_deleted);
+    if (!test && isSupabaseConfigured && supabase) {
+      try {
+        const { data } = await supabase.from('assessments').select('*').eq('id', testId).maybeSingle();
+        if (data) {
+          test = data.data || data;
+          memoryStore.tests.push(test);
+        }
+      } catch {}
+    }
     if (!test) {
       throw new Error('Test not found or has been deleted.');
     }
@@ -69,14 +89,31 @@ export class SessionService {
     }
 
     // 1. Session Locking: check for existing active session for this student + test
-    const existingActive = memoryStore.sessions.find(
-      (s) => s.test_id === testId && s.student_id === studentId && s.status === 'ACTIVE'
+    let existingActive = memoryStore.sessions.find(
+      (s) => s.test_id === testId && s.student_id === studentId && (s.status === 'ACTIVE' || s.attempt_status === 'IN_PROGRESS')
     );
+
+    if (!existingActive && isSupabaseConfigured && supabase) {
+      try {
+        const { data } = await supabase
+          .from('sessions')
+          .select('*')
+          .eq('test_id', testId)
+          .eq('student_id', studentId)
+          .eq('status', 'ACTIVE')
+          .maybeSingle();
+        if (data) {
+          existingActive = data;
+          memoryStore.sessions.push(existingActive);
+        }
+      } catch {}
+    }
 
     if (existingActive) {
       // Reconnection: restore existing active session
       existingActive.connection_status = 'connected';
       existingActive.last_heartbeat = now.toISOString();
+      existingActive.last_seen_at = now.toISOString();
       existingActive.updated_at = now.toISOString();
 
       const remainingTime = this.calculateRemainingSeconds(existingActive.end_time, now);
@@ -86,6 +123,7 @@ export class SessionService {
         session: {
           ...existingActive,
           remaining_seconds: remainingTime,
+          remainingSec: remainingTime,
         },
         isRestored: true,
         serverTime: now.toISOString(),
@@ -113,6 +151,7 @@ export class SessionService {
       submitted_at: null,
       connection_status: 'connected',
       last_heartbeat: startedAt,
+      last_seen_at: startedAt,
       score: 0,
       total_marks: test.total_marks || 100,
       warnings_count: 0,
@@ -136,6 +175,7 @@ export class SessionService {
       session: {
         ...newSession,
         remaining_seconds: durationMinutes * 60,
+        remainingSec: durationMinutes * 60,
       },
       isRestored: false,
       serverTime: startedAt,
@@ -143,13 +183,24 @@ export class SessionService {
   }
 
   static async recordHeartbeat(sessionId) {
-    const session = memoryStore.sessions.find((s) => s.id === sessionId);
+    let session = memoryStore.sessions.find((s) => s.id === sessionId);
+    if (!session && isSupabaseConfigured && supabase) {
+      try {
+        const { data } = await supabase.from('sessions').select('*').eq('id', sessionId).maybeSingle();
+        if (data) {
+          session = data;
+          memoryStore.sessions.push(session);
+        }
+      } catch {}
+    }
     if (!session) return null;
 
     const now = this.getServerTime();
-    session.last_heartbeat = now.toISOString();
+    const nowIso = now.toISOString();
+    session.last_heartbeat = nowIso;
+    session.last_seen_at = nowIso;
     session.connection_status = 'connected';
-    session.updated_at = now.toISOString();
+    session.updated_at = nowIso;
 
     const remainingTime = this.calculateRemainingSeconds(session.end_time, now);
     const isExpired = this.isSessionExpired(session.end_time, now);
@@ -157,15 +208,33 @@ export class SessionService {
     if (isExpired && (session.attempt_status === 'IN_PROGRESS' || session.status === 'ACTIVE')) {
       session.status = 'EXPIRED';
       session.attempt_status = 'AUTO_SUBMITTED';
-      session.submitted_at = now.toISOString();
-      session.completed_at = now.toISOString();
+      session.submitted_at = nowIso;
+      session.completed_at = nowIso;
       logger.info(`Session ${sessionId} marked EXPIRED by authoritative server clock.`);
     }
 
+    // Asynchronously sync to Supabase without blocking the HTTP response
+    if (isSupabaseConfigured && supabase) {
+      supabase
+        .from('sessions')
+        .update({
+          last_heartbeat: nowIso,
+          last_seen_at: nowIso,
+          connection_status: 'connected',
+          updated_at: nowIso,
+          ...(isExpired ? { status: 'EXPIRED', attempt_status: 'AUTO_SUBMITTED', submitted_at: nowIso, completed_at: nowIso } : {}),
+        })
+        .eq('id', sessionId)
+        .then(() => {})
+        .catch((err) => logger.warn('Supabase heartbeat sync error:', err.message));
+    }
+
     return {
+      success: true,
       session,
-      serverTime: now.toISOString(),
+      serverTime: nowIso,
       remaining_seconds: remainingTime,
+      remainingSec: remainingTime,
       isExpired,
       status: session.status,
       connection_status: 'connected',

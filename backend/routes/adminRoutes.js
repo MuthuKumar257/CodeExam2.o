@@ -7,6 +7,8 @@ import { requireRole } from '../middleware/roleMiddleware.js';
 
 const router = Router();
 
+router.get('/', optionalAuthenticate, AdminController.getAdmins);
+router.post('/', authenticate, requireRole('ADMIN'), AdminController.createAdmin);
 router.get('/students', optionalAuthenticate, StudentController.getStudents);
 router.get('/faculty', optionalAuthenticate, FacultyController.getFaculty);
 router.get('/settings', optionalAuthenticate, AdminController.getSettings);

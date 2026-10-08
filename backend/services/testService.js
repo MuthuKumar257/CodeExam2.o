@@ -4,6 +4,9 @@ import { logger } from '../utils/logger.js';
 
 export class TestService {
   static async listTests(filter = {}) {
+    const page = Math.max(1, Number(filter.page || 1));
+    const limit = Math.max(1, Number(filter.limit || 50));
+
     let tests = memoryStore.tests.filter((t) => !t.is_deleted && t.status !== 'DELETED');
 
     if (filter.facultyId) {
@@ -15,18 +18,42 @@ export class TestService {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        let query = supabase.from('tests').select('*').eq('is_deleted', false);
+        let query = supabase.from('assessments').select('*', { count: 'exact' }).eq('is_deleted', false);
         if (filter.facultyId) query = query.eq('faculty_id', filter.facultyId);
-        const { data, error } = await query;
-        if (!error && data && data.length > 0) {
-          tests = data;
+        if (filter.status) query = query.eq('status', filter.status.toUpperCase());
+        const from = (page - 1) * limit;
+        const to = from + limit - 1;
+        const { data, count, error } = await query.range(from, to);
+        if (!error && Array.isArray(data) && data.length > 0) {
+          const total = count ?? data.length;
+          return {
+            data,
+            pagination: {
+              page,
+              limit,
+              total,
+              hasMore: page * limit < total,
+            },
+          };
         }
       } catch (err) {
         logger.warn('Supabase list tests fallback:', err.message);
       }
     }
 
-    return tests;
+    const total = tests.length;
+    const startIndex = (page - 1) * limit;
+    const paginated = tests.slice(startIndex, startIndex + limit);
+
+    return {
+      data: paginated,
+      pagination: {
+        page,
+        limit,
+        total,
+        hasMore: page * limit < total,
+      },
+    };
   }
 
   static async getTestById(id) {

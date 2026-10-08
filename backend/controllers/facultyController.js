@@ -1,67 +1,55 @@
-import bcrypt from 'bcryptjs';
+import { UserService } from '../services/userService.js';
 import { memoryStore, supabase, isSupabaseConfigured } from '../services/supabaseService.js';
-import { sendSuccess, sendError } from '../utils/response.js';
+import { sendSuccess, sendPaginated, sendError } from '../utils/response.js';
 
 export class FacultyController {
   static async getFaculty(req, res, next) {
     try {
-      const faculty = memoryStore.users
-        .filter((u) => u.role === 'FACULTY')
-        .map(({ password: _, ...f }) => f);
-      return sendSuccess(res, faculty);
+      const { page = 1, limit = 50, department } = req.query;
+      const result = await UserService.listUsers({
+        role: 'FACULTY',
+        department,
+        page,
+        limit,
+      });
+      return sendPaginated(res, result.data, result.pagination, 'Faculty members retrieved successfully.');
     } catch (err) {
-      next(err);
+      return sendError(res, 'Unable to fetch data from the database.', 500, 'DATABASE_FETCH_FAILED', req.requestId);
     }
   }
 
   static async getFacultyById(req, res, next) {
     try {
-      const faculty = memoryStore.users.find((u) => u.id === req.params.id && u.role === 'FACULTY');
-      if (!faculty) {
+      const faculty = await UserService.findUserById(req.params.id);
+      if (!faculty || String(faculty.role).toUpperCase() !== 'FACULTY') {
         return sendError(res, 'Faculty member not found.', 404, 'NOT_FOUND');
       }
       const { password: _, ...safeFaculty } = faculty;
       return sendSuccess(res, safeFaculty);
     } catch (err) {
-      next(err);
+      return sendError(res, 'Unable to fetch faculty member from the database.', 500, 'DATABASE_FETCH_FAILED', req.requestId);
     }
   }
 
   static async createFaculty(req, res, next) {
     try {
-      const { email, name, password, department } = req.body;
-      if (!email || !name) {
-        return sendError(res, 'Email and name are required.', 400, 'MISSING_FIELDS');
-      }
-
-      const existing = memoryStore.users.find((u) => u.email.toLowerCase() === email.toLowerCase());
-      if (existing) {
-        return sendError(res, 'User with this email already exists.', 409, 'USER_EXISTS');
-      }
-
-      const hashedPassword = await bcrypt.hash(password || 'Faculty@123', 10);
-      const newFaculty = {
-        id: `usr-faculty-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      const { email, name, password, department, institution_id } = req.body;
+      const created = await UserService.createUser({
         name,
         email,
-        password: hashedPassword,
+        password,
         role: 'FACULTY',
-        department: department || 'Computer Science & Engineering',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-
-      memoryStore.users.push(newFaculty);
-
-      if (isSupabaseConfigured && supabase) {
-        try {
-          await supabase.from('users').upsert(newFaculty);
-        } catch {}
-      }
-
-      const { password: _, ...safeFaculty } = newFaculty;
-      return sendSuccess(res, safeFaculty, 'Faculty member created.', 201);
+        department,
+        institution_id,
+      });
+      return sendSuccess(res, created, 'Faculty member created.', 201);
     } catch (err) {
+      if (err.errorCode === 'EMAIL_ALREADY_EXISTS') {
+        return sendError(res, err.message, 409, 'EMAIL_ALREADY_EXISTS');
+      }
+      if (err.errorCode === 'MISSING_FIELDS' || err.errorCode === 'INVALID_EMAIL') {
+        return sendError(res, err.message, 400, err.errorCode);
+      }
       next(err);
     }
   }
@@ -71,6 +59,17 @@ export class FacultyController {
       const index = memoryStore.users.findIndex((u) => u.id === req.params.id && u.role === 'FACULTY');
       if (index === -1) {
         return sendError(res, 'Faculty member not found.', 404, 'NOT_FOUND');
+      }
+
+      // If email is being updated, verify it doesn't collide with existing user
+      if (req.body.email) {
+        const normalized = UserService.normalizeEmail(req.body.email);
+        const existing = await UserService.findUserByNormalizedEmail(normalized);
+        if (existing && existing.id !== req.params.id) {
+          return sendError(res, 'This email is already registered to another person.', 409, 'EMAIL_ALREADY_EXISTS');
+        }
+        req.body.email = normalized;
+        req.body.email_normalized = normalized;
       }
 
       const updated = {

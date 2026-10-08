@@ -4,6 +4,7 @@ import { optionalAuthenticate } from '../middleware/authMiddleware.js';
 
 const router = Router();
 
+router.get('/', optionalAuthenticate, SessionController.getAllSessions);
 router.post('/', optionalAuthenticate, SessionController.createOrRestoreSession);
 router.get('/test/:testId', optionalAuthenticate, SessionController.getSessionsByTest);
 router.get('/test/:testId/active', optionalAuthenticate, SessionController.getSessionsByTest);

@@ -47,6 +47,7 @@ import { ProctorCamera } from './ProctorCamera';
 import { storeSessionVideo } from '../../services/videoStorage';
 import { saveAttemptToFirestore } from '../../services/firebase';
 import { getCandidateAssignedQuestions } from '../../utils/submissionUtils';
+import { setAssessmentActiveState } from '../../services/supabaseDatabase';
 import {
   uploadRecordingApi,
   startScreenRecordingApi,
@@ -1164,6 +1165,18 @@ export const AssessmentWorkspace: React.FC<AssessmentWorkspaceProps> = ({
     if (session.currentQuestion !== undefined) return session.currentQuestion;
     return 0;
   });
+  const currentQIndexRef = useRef<number>(currentQIndex);
+  useEffect(() => {
+    currentQIndexRef.current = currentQIndex;
+  }, [currentQIndex]);
+
+  useEffect(() => {
+    setAssessmentActiveState(true);
+    return () => {
+      setAssessmentActiveState(false);
+    };
+  }, []);
+
   const currentQuestion: Question = candidateQuestions[currentQIndex] || candidateQuestions[0] || fallbackQuestion;
 
   // Editor states (strictly loaded from student's individual attempt)
@@ -2191,26 +2204,45 @@ fn main() {
     return () => clearInterval(timer);
   }, [isPaused]);
 
-  // Candidate Heartbeat effect: Pings server watchdog every 3.5s via HTTP and Socket.IO
+  const isHeartbeatInFlightRef = useRef(false);
+  const consecutiveHeartbeatFailuresRef = useRef(0);
+
+  // Candidate Heartbeat effect: Pings server watchdog every 12s via HTTP and Socket.IO
   // Heartbeat is used to synchronize server time, remaining seconds, and verify expiration.
+  // Concurrency lock: strictly 1 in-flight heartbeat at a time.
+  // On network drop: exponential backoff without resetting timer or ending test.
   useEffect(() => {
     if (isPaused || isSubmitting) return;
 
+    let heartbeatTimeoutTimer: any = null;
+
     const pingHeartbeat = async () => {
+      if (isHeartbeatInFlightRef.current) return;
+      isHeartbeatInFlightRef.current = true;
+
+      const controller = new AbortController();
+      const abortTimer = setTimeout(() => {
+        try { controller.abort(); } catch {}
+      }, 9000);
+
       try {
         const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}/heartbeat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
           body: JSON.stringify({
             assessmentId: safeAssessment.id,
             candidateId: session.candidateId,
             timeLeftSec: timeLeftSecRef.current,
-            currentQuestionIndex: currentQIndex,
+            currentQuestionIndex: currentQIndexRef.current,
             warningsCount: warningsCountRef.current,
           }),
         });
+        clearTimeout(abortTimer);
+
         if (res.ok) {
-          const payload = await res.json();
+          consecutiveHeartbeatFailuresRef.current = 0;
+          const payload = await res.json().catch(() => null);
           const data = payload?.data || payload;
           if (data?.serverTime) {
             const sTime = typeof data.serverTime === 'number' ? data.serverTime : new Date(data.serverTime).getTime();
@@ -2226,26 +2258,39 @@ fn main() {
             console.log('[AssessmentWorkspace] Server confirmed test expiration via heartbeat. Submitting...');
             syncAllCodeAndFinish('Time Expired');
           }
+        } else {
+          consecutiveHeartbeatFailuresRef.current++;
+          console.warn(`[AssessmentWorkspace] Heartbeat non-ok status: ${res.status}. Test remains ACTIVE.`);
         }
-      } catch (err) {
-        console.warn('[AssessmentWorkspace] Heartbeat ping failed (test remains ACTIVE):', err);
+      } catch (err: any) {
+        clearTimeout(abortTimer);
+        consecutiveHeartbeatFailuresRef.current++;
+        // Temporary network issues or heartbeat failures must NOT end the test or reset the timer
+        console.warn('[AssessmentWorkspace] Heartbeat ping failed (test remains ACTIVE):', err?.message || err);
+      } finally {
+        isHeartbeatInFlightRef.current = false;
       }
 
       if (socketRef.current && socketRef.current.connected) {
-        socketRef.current.emit('candidate_heartbeat', {
-          assessmentId: safeAssessment.id,
-          sessionId: session.id,
-          candidateId: session.candidateId,
-          timeLeftSec: timeLeftSecRef.current,
-          warningsCount: warningsCountRef.current,
-        });
+        try {
+          socketRef.current.emit('candidate_heartbeat', {
+            assessmentId: safeAssessment.id,
+            sessionId: session.id,
+            candidateId: session.candidateId,
+            timeLeftSec: timeLeftSecRef.current,
+            warningsCount: warningsCountRef.current,
+          });
+        } catch {}
       }
     };
 
     pingHeartbeat();
-    const heartbeatInterval = setInterval(pingHeartbeat, 3500);
-    return () => clearInterval(heartbeatInterval);
-  }, [isPaused, isSubmitting, session.id, safeAssessment.id, session.candidateId, currentQIndex]);
+    const heartbeatInterval = setInterval(pingHeartbeat, 12000);
+    return () => {
+      clearInterval(heartbeatInterval);
+      if (heartbeatTimeoutTimer) clearTimeout(heartbeatTimeoutTimer);
+    };
+  }, [isPaused, isSubmitting, session.id, safeAssessment.id, session.candidateId]);
 
   // Event Listeners for Proctoring
   useEffect(() => {
