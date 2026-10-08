@@ -213,7 +213,6 @@ export function mergeArraySmart<T extends { id?: string | number }>(localArr: T[
 
 function loadStorage<T>(key: string, fallback: T): T {
   try {
-    if (import.meta.env.PROD) return fallback;
     const raw = localStorage.getItem(key);
     if (!raw) {
       if (Array.isArray(fallback)) {
@@ -822,45 +821,9 @@ export async function loginWithEmailPassword(identifier: string, pass: string): 
   const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
   let supabaseAuthError: (Error & SupabaseAuthError) | null = null;
 
-  // 1. Check with Supabase Auth if identifier is a valid email
-  if (isEmail && supabase) {
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: trimmed,
-        password: pass,
-      });
-      if (error) {
-        supabaseAuthError = getSupabaseAuthError(error);
-      }
-      if (!error && data?.user) {
-        let cached = localUsers.find((u) => u.id === data.user?.id || u.email?.toLowerCase() === trimmed);
-        if (!cached) {
-          // Direct fetch from Supabase users table
-          const { data: dbUser } = await supabase.from('users').select('*').eq('id', data.user.id).maybeSingle();
-          if (dbUser) {
-            const parsedUser = dbUser.data || dbUser;
-            if (parsedUser) {
-              cached = parsedUser;
-              localUsers = deduplicateById([parsedUser, ...localUsers]);
-              saveStorage(STORAGE_KEYS.USERS, localUsers);
-              notify(listeners.users, localUsers);
-            }
-          }
-        }
-        if (cached) {
-          const userWithTimestamp = { ...cached, lastLoginAt: new Date().toISOString() };
-          setLocalStoredUser(userWithTimestamp);
-          return userWithTimestamp;
-        }
-      }
-    } catch (error) {
-      supabaseAuthError = error instanceof Error
-        ? (error as Error & SupabaseAuthError)
-        : getSupabaseAuthError({ message: String(error) });
-    }
-  }
-
-  // 2. Database User Match Fallback (check local memory first)
+  // Check users managed by the application before contacting Supabase Auth.
+  // These users may authenticate against the local/Supabase users table and do
+  // not have a corresponding Supabase Auth identity.
   let found = localUsers.find(
     (u) =>
       u.email?.toLowerCase() === trimmed ||
@@ -869,7 +832,9 @@ export async function loginWithEmailPassword(identifier: string, pass: string): 
       (u as any).username?.toLowerCase() === trimmed
   );
 
-  // 3. If not found in memory, query Supabase database 'users' table directly!
+  // If not found in memory, query the users table before attempting password
+  // auth. This prevents expected application-managed logins from generating a
+  // noisy /auth/v1/token 400 response.
   if (!found && supabase) {
     try {
       const { data: dbRows, error: dbErr } = await supabase.from('users').select('*');
@@ -892,7 +857,7 @@ export async function loginWithEmailPassword(identifier: string, pass: string): 
     }
   }
 
-  // 4. Also check active stored user or demo users
+  // Also check the active stored user or demo users.
   if (!found) {
     const cur = getLocalStoredUser();
     if (
@@ -914,7 +879,7 @@ export async function loginWithEmailPassword(identifier: string, pass: string): 
     );
   }
 
-  // 5. If user found in database or demo records, verify password
+  // Verify application-managed users without invoking Supabase Auth.
   if (found) {
     const storedPass = (found as any).password || (found as any).rawPassword || 'password';
     if (
@@ -933,7 +898,41 @@ export async function loginWithEmailPassword(identifier: string, pass: string): 
     throw new Error('Invalid password. Please check your credentials.');
   }
 
-  // 6. User genuinely does not exist
+  // Only identities that are not application-managed need Supabase Auth.
+  if (isEmail && supabase) {
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: trimmed,
+        password: pass,
+      });
+      if (error) {
+        supabaseAuthError = getSupabaseAuthError(error);
+      }
+      if (!error && data?.user) {
+        const userFromAuth: User = {
+          id: data.user.id,
+          name: data.user.user_metadata?.name || data.user.email?.split('@')[0] || 'User',
+          email: data.user.email || trimmed,
+          role: (data.user.user_metadata?.role as UserRole) || 'CANDIDATE',
+          department: 'Computer Science & Engineering',
+          institutionId: 'inst-1',
+          createdAt: data.user.created_at || new Date().toISOString(),
+          status: 'ACTIVE',
+        };
+        const userWithTimestamp = { ...userFromAuth, lastLoginAt: new Date().toISOString() };
+        localUsers = mergeArraySmart(localUsers, [userWithTimestamp]);
+        saveStorage(STORAGE_KEYS.USERS, localUsers);
+        setLocalStoredUser(userWithTimestamp);
+        return userWithTimestamp;
+      }
+    } catch (error) {
+      supabaseAuthError = error instanceof Error
+        ? (error as Error & SupabaseAuthError)
+        : getSupabaseAuthError({ message: String(error) });
+    }
+  }
+
+  // The account genuinely does not exist.
   if (supabaseAuthError) {
     throw supabaseAuthError;
   }
