@@ -3,6 +3,18 @@ import { auth, getLocalStoredUser } from './firebase';
 const API_BASE = '';
 const REQUEST_TIMEOUT_MS = 15_000;
 
+export class ApiRequestError extends Error {
+  status?: number;
+  errorCode?: string;
+  requestId?: string;
+
+  constructor(message: string, details: { status?: number; errorCode?: string; requestId?: string } = {}) {
+    super(message);
+    this.name = 'ApiRequestError';
+    Object.assign(this, details);
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}, maxRetries: number = 2): Promise<T> {
   const token = auth.currentUser ? await auth.currentUser.getIdToken() : null;
   const headers = new Headers(options.headers);
@@ -16,45 +28,57 @@ async function request<T>(path: string, options: RequestInit = {}, maxRetries: n
   if (options.body && !(options.body instanceof FormData)) headers.set('Content-Type', 'application/json');
 
   let attempt = 0;
+  const method = (options.method || 'GET').toUpperCase();
+  const retryableMethod = method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
   while (true) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const abortHandler = () => controller.abort();
+    options.signal?.addEventListener('abort', abortHandler, { once: true });
     try {
-      const response = await fetch(`${API_BASE}${path}`, { ...options, headers, signal: options.signal || controller.signal });
+      const response = await fetch(`${API_BASE}${path}`, { ...options, headers, signal: controller.signal });
       if (!response.ok) {
-        const isRetryable = response.status === 429 || response.status === 502 || response.status === 503 || response.status === 504;
+        const isRetryable = retryableMethod &&
+          (response.status === 429 || response.status === 502 || response.status === 503 || response.status === 504);
         if (isRetryable && attempt < maxRetries) {
           attempt++;
           const retryAfter = response.headers.get('Retry-After');
-          const delay = retryAfter ? Number(retryAfter) * 1000 : 250 * Math.pow(2, attempt) + Math.random() * 150;
-          await new Promise((r) => setTimeout(r, delay));
+          const retrySeconds = retryAfter ? Number(retryAfter) : NaN;
+          const retryDate = retryAfter ? Date.parse(retryAfter) - Date.now() : NaN;
+          const delay = Number.isFinite(retrySeconds)
+            ? Math.max(0, retrySeconds * 1000)
+            : Number.isFinite(retryDate)
+              ? Math.max(0, retryDate)
+              : 250 * Math.pow(2, attempt) + Math.random() * 150;
+          await new Promise((resolve) => setTimeout(resolve, delay));
           continue;
         }
 
         const isJson = response.headers.get('content-type')?.includes('application/json');
         const body = isJson ? await response.json().catch(() => null) : null;
-        const error = new Error(body?.error || body?.message || 'The request could not be completed.') as Error & { status?: number };
-        error.status = response.status;
-        throw error;
+        throw new ApiRequestError(
+          body?.message || body?.error || 'The request could not be completed.',
+          { status: response.status, errorCode: body?.errorCode, requestId: body?.requestId }
+        );
       }
       const isJson = response.headers.get('content-type')?.includes('application/json');
-      if (isJson) {
-        return response.json() as Promise<T>;
-      }
+      if (isJson) return response.json() as Promise<T>;
       const text = await response.text();
       return (text ? { message: text } : {}) as Promise<T>;
     } catch (err: any) {
-      if (attempt < maxRetries && (err.name === 'TypeError' || err.name === 'AbortError')) {
+      if (retryableMethod && attempt < maxRetries && (err.name === 'TypeError' || err.name === 'AbortError')) {
         attempt++;
-        await new Promise((r) => setTimeout(r, 300 * Math.pow(2, attempt)));
+        await new Promise((resolve) => setTimeout(resolve, 300 * Math.pow(2, attempt)));
         continue;
       }
       throw err;
     } finally {
       clearTimeout(timeout);
+      options.signal?.removeEventListener('abort', abortHandler);
     }
   }
 }
+
 
 export async function deleteResource(resource: 'users' | 'classes' | 'questions' | 'assessments', id: string) {
   if (!id || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(id)) {
@@ -98,7 +122,9 @@ export async function downloadFile(fileId: string): Promise<Blob> {
   const response = await fetch(`${API_BASE}/api/files/${fileId}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   });
-  if (!response.ok) throw new Error('The file could not be downloaded.');
+  if (!response.ok) {
+    throw new ApiRequestError('The file could not be downloaded.', { status: response.status, requestId: response.headers.get('X-Request-Id') || undefined });
+  }
   return response.blob();
 }
 

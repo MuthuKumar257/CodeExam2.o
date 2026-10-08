@@ -11,6 +11,7 @@ import {
   storeUploadedRecording,
 } from '../services/recordingService.js';
 import { sendError, sendSuccess } from '../utils/response.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 
 const router = Router();
 const upload = multer({
@@ -75,9 +76,9 @@ router.post('/upload', upload.single('recording'), async (req, res, next) => {
   }
 });
 
-router.get('/assessment/:assessmentId', async (req, res) => {
+router.get('/assessment/:assessmentId', asyncHandler(async (req, res) => {
   return sendSuccess(res, { recordings: getRecordingsForAssessment(req.params.assessmentId) });
-});
+}));
 
 router.get('/stream/:recordingId', async (req, res, next) => {
   try {
@@ -104,24 +105,24 @@ router.get('/stream/:recordingId', async (req, res, next) => {
   }
 });
 
-router.get('/:recordingId', async (req, res) => {
+router.get('/:recordingId', asyncHandler(async (req, res) => {
   const recording = await getRecording(req.params.recordingId);
   if (!recording) return sendError(res, 'Recording not found.', 404, 'RECORDING_NOT_FOUND');
   return sendSuccess(res, { recording });
-});
+}));
 
 export function registerRecordingLookups(app) {
-  app.get('/api/sessions/:sessionId/screen-video', async (req, res) => {
+  app.get('/api/sessions/:sessionId/screen-video', asyncHandler(async (req, res) => {
     const recording = getRecordingForSession(req.params.sessionId, 'screen');
     return sendSuccess(res, recording ? {
       url: recording.playbackUrl,
       isStored: true,
       ...recording,
     } : { url: null, isStored: false });
-  });
-  app.get('/api/assessments/:assessmentId/recordings', async (req, res) => {
+  }));
+  app.get('/api/assessments/:assessmentId/recordings', asyncHandler(async (req, res) => {
     return sendSuccess(res, { recordings: getRecordingsForAssessment(req.params.assessmentId) });
-  });
+  }));
 }
 
 export default router;

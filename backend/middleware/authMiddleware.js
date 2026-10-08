@@ -7,14 +7,31 @@ const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
   throw new Error('JWT_SECRET must be configured before starting the backend.');
 }
+const allowDevHeaderAuth = process.env.NODE_ENV !== 'production' && process.env.ALLOW_INSECURE_DEV_AUTH !== 'false';
+
+function getBearerToken(req) {
+  const header = req.headers.authorization;
+  if (typeof header !== 'string' || !header.startsWith('Bearer ')) return null;
+  const token = header.slice('Bearer '.length).trim();
+  return token || null;
+}
+
+function getDevHeaderUser(req) {
+  if (!allowDevHeaderAuth) return null;
+  const customUserId = req.headers['x-user-id'];
+  if (typeof customUserId !== 'string' || !customUserId.trim()) return null;
+  const customUserRole = req.headers['x-user-role'];
+  const user = memoryStore.users.find((candidate) => candidate.id === customUserId);
+  return user || {
+    id: customUserId,
+    email: 'user@codeexam.edu',
+    name: 'User',
+    role: typeof customUserRole === 'string' ? customUserRole.toUpperCase() : 'STUDENT',
+  };
+}
 
 export function authenticate(req, res, next) {
-  const authHeader = req.headers.authorization;
-  const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
-
-  // Header-based identity fallback (e.g. x-user-id) for local resilience
-  const customUserId = req.headers['x-user-id'];
-  const customUserRole = req.headers['x-user-role'];
+  const token = getBearerToken(req);
 
   if (token) {
     try {
@@ -22,41 +39,32 @@ export function authenticate(req, res, next) {
       req.user = decoded;
       return next();
     } catch (err) {
-      // If token invalid but custom header present, fallback
-      if (!customUserId) {
-        return sendError(res, 'Invalid or expired token.', 401, 'INVALID_TOKEN');
-      }
+      return sendError(res, 'Invalid or expired token.', 401, 'INVALID_TOKEN', req.requestId);
     }
   }
 
-  if (customUserId) {
-    const user = memoryStore.users.find((u) => u.id === customUserId);
-    if (user) {
-      req.user = {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: (customUserRole || user.role || 'STUDENT').toUpperCase(),
-      };
-      return next();
-    }
+  const devUser = getDevHeaderUser(req);
+  if (devUser) {
     req.user = {
-      id: customUserId,
-      email: 'user@codeexam.edu',
-      name: 'User',
-      role: (customUserRole || 'STUDENT').toUpperCase(),
+      id: devUser.id,
+      email: devUser.email,
+      name: devUser.name,
+      role: (devUser.role || 'STUDENT').toUpperCase(),
     };
     return next();
   }
 
-  return sendError(res, 'Authentication required.', 401, 'UNAUTHORIZED');
+  return sendError(
+    res,
+    allowDevHeaderAuth ? 'Authentication required.' : 'A valid bearer token is required.',
+    401,
+    'UNAUTHORIZED',
+    req.requestId
+  );
 }
 
 export function optionalAuthenticate(req, res, next) {
-  const authHeader = req.headers.authorization;
-  const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
-  const customUserId = req.headers['x-user-id'];
-  const customUserRole = req.headers['x-user-role'];
+  const token = getBearerToken(req);
 
   if (token) {
     try {
@@ -65,12 +73,9 @@ export function optionalAuthenticate(req, res, next) {
     } catch {}
   }
 
-  if (customUserId) {
-    const user = memoryStore.users.find((u) => u.id === customUserId);
-    req.user = user || {
-      id: customUserId,
-      role: (customUserRole || 'STUDENT').toUpperCase(),
-    };
+  const devUser = getDevHeaderUser(req);
+  if (devUser) {
+    req.user = devUser;
     return next();
   }
 
