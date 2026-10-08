@@ -104,6 +104,7 @@ const STORAGE_KEYS = {
   STUDENT_SETTINGS: 'codeguard_db_stu_settings',
   CURRENT_USER: 'codeguard_current_user',
 };
+const LEGACY_DEMO_ASSESSMENT_IDS = new Set(['test-demo-01', 'test-demo-02']);
 
 export function deduplicateById<T extends { id?: string | number }>(arr: T[] | null | undefined): T[] {
   if (!Array.isArray(arr)) return [];
@@ -242,7 +243,9 @@ const localFallback = <T>(seed: T): T => (import.meta.env.PROD ? (Array.isArray(
 let localUsers: User[] = loadStorage(STORAGE_KEYS.USERS, localFallback(DEMO_USERS));
 let localClasses: Classroom[] = loadStorage(STORAGE_KEYS.CLASSES, localFallback(INITIAL_CLASSES));
 let localDepartments: Department[] = loadStorage(STORAGE_KEYS.DEPARTMENTS, localFallback(INITIAL_DEPARTMENTS));
-let localAssessments: Assessment[] = loadStorage(STORAGE_KEYS.ASSESSMENTS, localFallback(INITIAL_ASSESSMENTS));
+let localAssessments: Assessment[] = loadStorage(STORAGE_KEYS.ASSESSMENTS, localFallback(INITIAL_ASSESSMENTS))
+  .filter((assessment) => !LEGACY_DEMO_ASSESSMENT_IDS.has(assessment.id));
+saveStorage(STORAGE_KEYS.ASSESSMENTS, localAssessments);
 let localQuestions: Question[] = loadStorage(STORAGE_KEYS.QUESTIONS, localFallback(INITIAL_QUESTIONS));
 let localSessions: CandidateSession[] = loadStorage(STORAGE_KEYS.SESSIONS, localFallback(INITIAL_SESSIONS));
 let localSubmissions: Submission[] = loadStorage(STORAGE_KEYS.SUBMISSIONS, localFallback(INITIAL_SUBMISSIONS));
@@ -548,7 +551,9 @@ export async function fetchAndSyncAllData(force: boolean = false): Promise<void>
           notify(listeners.users, localUsers);
         }
         if (Array.isArray(remoteAssessments)) {
-          localAssessments = remoteAssessments.map(unpack);
+          localAssessments = remoteAssessments
+            .map(unpack)
+            .filter((assessment) => !LEGACY_DEMO_ASSESSMENT_IDS.has(assessment.id));
           saveStorage(STORAGE_KEYS.ASSESSMENTS, localAssessments);
           notify(listeners.assessments, localAssessments);
         }

@@ -29,12 +29,17 @@ import { setupWebSocket } from './websocket/testSocket.js';
 import { isSupabaseConfigured, supabase } from './services/supabaseService.js';
 import { logger } from './utils/logger.js';
 import { SessionService } from './services/sessionService.js';
+import { TestService } from './services/testService.js';
 import { sendError, sendSuccess } from './utils/response.js';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+TestService.removeLegacyDemoTests()
+  .then(() => logger.info('Legacy demo assessments removed.'))
+  .catch((err) => logger.error('Legacy demo assessment cleanup failed:', err));
 
 // Middleware
 app.use(

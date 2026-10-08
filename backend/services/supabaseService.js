@@ -268,50 +268,13 @@ export const defaultTestcases = [
   },
 ];
 
-export const defaultTests = [
-  {
-    id: 'test-demo-01',
-    title: 'Data Structures & Algorithms Midterm',
-    description: 'Comprehensive coding assessment evaluating basic array operations, hashing, and stacks.',
-    instructions: 'Complete all questions within the allotted duration. Fullscreen is monitored. Do not switch tabs.',
-    duration_minutes: 60,
-    start_time: new Date(Date.now() - 3600000).toISOString(),
-    end_time: new Date(Date.now() + 7 * 86400000).toISOString(),
-    total_marks: 80,
-    passing_marks: 40,
-    faculty_id: 'usr-faculty-01',
-    faculty_name: 'Prof. Alan Turing',
-    status: 'ACTIVE',
-    question_ids: ['q-01', 'q-02', 'q-03'],
-    allowed_languages: ['javascript', 'python', 'cpp', 'java', 'c'],
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'test-demo-02',
-    title: 'Advanced Competitive Coding Sprint',
-    description: 'High-speed problem-solving test covering dynamic programming, two pointers, and strings.',
-    instructions: 'Submit optimized solutions with O(N) or O(N log N) time complexity.',
-    duration_minutes: 90,
-    start_time: new Date(Date.now() + 86400000).toISOString(),
-    end_time: new Date(Date.now() + 14 * 86400000).toISOString(),
-    total_marks: 100,
-    passing_marks: 50,
-    faculty_id: 'usr-faculty-01',
-    faculty_name: 'Prof. Alan Turing',
-    status: 'UPCOMING',
-    question_ids: ['q-02', 'q-03', 'q-04'],
-    allowed_languages: ['javascript', 'python', 'cpp', 'java'],
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-];
+export const LEGACY_DEMO_TEST_IDS = ['test-demo-01', 'test-demo-02'];
 
 export const memoryStore = {
   users: isProduction ? [] : defaultUsers.filter((user) => String(user.role).toUpperCase() === 'ADMIN'),
   questions: isProduction ? [] : [...defaultQuestions],
   testcases: isProduction ? [] : [...defaultTestcases],
-  tests: isProduction ? [] : [...defaultTests],
+  tests: [],
   sessions: [],
   submissions: [],
   settings: {
