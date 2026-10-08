@@ -1,24 +1,6 @@
 version: '3.8'
 
 services:
-  postgres:
-    image: postgres:15-alpine
-    container_name: codeguard_postgres
-    restart: always
-    environment:
-      POSTGRES_USER: codeguard
-      POSTGRES_PASSWORD: codeguard_password
-      POSTGRES_DB: codeguard_db
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U codeguard -d codeguard_db"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
   redis:
     image: redis:7-alpine
     container_name: codeguard_redis
@@ -37,12 +19,12 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: postgresql://codeguard:codeguard_password@postgres:5432/codeguard_db?schema=public
+      SUPABASE_URL: ${SUPABASE_URL:?SUPABASE_URL must point to the existing production project}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:?SUPABASE_SECRET_KEY is required}
+      SUPABASE_JWKS_URL: ${SUPABASE_JWKS_URL:?SUPABASE_JWKS_URL is required}
       REDIS_URL: redis://redis:6379
-      JWT_SECRET: codeguard_super_secret_jwt_2026
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_started
 
@@ -59,6 +41,3 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - redis
-
-volumes:
-  postgres_data:

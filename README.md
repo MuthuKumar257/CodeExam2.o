@@ -13,8 +13,8 @@ lives in [`backend/`](./backend).
 
 ## Local development
 
-Configure the backend in [`backend/.env`](./backend/.env) and set `JWT_SECRET`,
-`SUPABASE_URL`, `SUPABASE_SECRET_KEY`,
+Configure the backend in [`backend/.env`](./backend/.env) (or deployment
+environment variables) and set `JWT_SECRET`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY`,
 and `SUPABASE_JWKS_URL` for a persistent deployment. Keep
 `SUPABASE_SECRET_KEY` server-only; only the publishable key may be exposed to the
 frontend.
@@ -57,3 +57,16 @@ Set a strong, unique `JWT_SECRET` and configure Supabase before deployment.
 Code execution is isolated by the backend code-runner service; do not expose
 the development fallback storage mode to production traffic. Restrict CORS to
 the deployed frontend origin in the deployment environment.
+
+The production database is the existing Supabase project identified by
+`SUPABASE_URL`. The backend verifies that connection before listening and does not
+run migrations, seeds, resets, cleanup jobs, or table-creation scripts at startup.
+Frontend builds and backend restarts only replace application processes; they do
+not modify Supabase data. Apply reviewed, additive migrations manually using the
+files in [`supabase/migrations/`](./supabase/migrations/), after confirming a
+current Supabase backup and the target project.
+
+The included [`docker-compose.yml`](./docker-compose.yml) intentionally does not
+define a Postgres service or `DATABASE_URL`; it runs Redis only as an application
+dependency and requires the existing Supabase credentials from the deployment
+environment.

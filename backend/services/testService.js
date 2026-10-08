@@ -1,37 +1,8 @@
-import {
-  memoryStore,
-  supabase,
-  isSupabaseConfigured,
-  LEGACY_DEMO_TEST_IDS,
-} from './supabaseService.js';
+import { memoryStore, supabase, isSupabaseConfigured } from './supabaseService.js';
 import { QuestionService } from './questionService.js';
 import { logger } from '../utils/logger.js';
 
 export class TestService {
-  static async removeLegacyDemoTests() {
-    memoryStore.tests = memoryStore.tests.filter((test) => !LEGACY_DEMO_TEST_IDS.includes(test.id));
-
-    if (isSupabaseConfigured && supabase) {
-      const { error: testsError } = await supabase
-        .from('tests')
-        .update({ is_deleted: true, status: 'DELETED', updated_at: new Date().toISOString() })
-        .in('id', LEGACY_DEMO_TEST_IDS);
-      if (testsError && testsError.code !== '42P01' && testsError.code !== 'PGRST205') {
-        throw new Error(`Failed to remove legacy demo assessments: ${testsError.message}`);
-      }
-
-      // Some deployments use the normalized assessments table instead of the
-      // legacy tests table. Clean those exact demo IDs as well.
-      const { error: assessmentsError } = await supabase
-        .from('assessments')
-        .update({ status: 'DELETED', deleted_at: new Date().toISOString() })
-        .in('id', LEGACY_DEMO_TEST_IDS);
-      if (assessmentsError && assessmentsError.code !== '42P01' && assessmentsError.code !== 'PGRST205') {
-        throw new Error(`Failed to remove legacy demo assessments: ${assessmentsError.message}`);
-      }
-    }
-  }
-
   static async listTests(filter = {}) {
     let tests = memoryStore.tests.filter((t) => !t.is_deleted && t.status !== 'DELETED');
 

@@ -268,8 +268,6 @@ export const defaultTestcases = [
   },
 ];
 
-export const LEGACY_DEMO_TEST_IDS = ['test-demo-01', 'test-demo-02'];
-
 export const memoryStore = {
   users: isProduction ? [] : defaultUsers.filter((user) => String(user.role).toUpperCase() === 'ADMIN'),
   questions: isProduction ? [] : [...defaultQuestions],

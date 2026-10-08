@@ -29,17 +29,12 @@ import { setupWebSocket } from './websocket/testSocket.js';
 import { isSupabaseConfigured, supabase } from './services/supabaseService.js';
 import { logger } from './utils/logger.js';
 import { SessionService } from './services/sessionService.js';
-import { TestService } from './services/testService.js';
 import { sendError, sendSuccess } from './utils/response.js';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-
-TestService.removeLegacyDemoTests()
-  .then(() => logger.info('Legacy demo assessments removed.'))
-  .catch((err) => logger.error('Legacy demo assessment cleanup failed:', err));
 
 // Middleware
 app.use(
@@ -187,11 +182,32 @@ server.on('error', (err) => {
   logger.error('Server error:', err);
 });
 
-// Start listening
-server.listen(PORT, () => {
-  logger.info(`[SERVER] CodeExam server started on port ${PORT}`);
-  logger.info(`🔌 WebSocket Realtime engine active on port ${PORT}`);
-  logger.info(`📦 Database: ${isSupabaseConfigured ? 'Supabase PostgreSQL' : 'Resilient In-Memory Mode'}`);
+async function startServer() {
+  if (process.env.NODE_ENV === 'production') {
+    if (!isSupabaseConfigured || !supabase) {
+      throw new Error('Production startup aborted: Supabase credentials are not configured.');
+    }
+
+    const { error } = await supabase.from('users').select('id').limit(1);
+    if (error) {
+      throw new Error(`Production startup aborted: Supabase connection failed: ${error.message}`);
+    }
+    logger.info('[DB] Production Supabase connection verified before server start.');
+  }
+
+  return new Promise((resolve) => {
+    server.listen(PORT, () => {
+      logger.info(`[SERVER] CodeExam server started on port ${PORT}`);
+      logger.info(`🔌 WebSocket Realtime engine active on port ${PORT}`);
+      logger.info(`📦 Database: ${isSupabaseConfigured ? 'Supabase PostgreSQL' : 'Resilient In-Memory Mode'}`);
+      resolve(server);
+    });
+  });
+}
+
+startServer().catch((err) => {
+  logger.error(err.message);
+  process.exit(1);
 });
 
-export { app, server, io };
+export { app, server, io, startServer };
