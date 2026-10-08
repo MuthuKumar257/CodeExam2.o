@@ -20,7 +20,7 @@ function resolveTable(table) {
   if (TABLE_CONFIG[table]) return TABLE_CONFIG[table];
   if (table === 'results') return { memoryKey: null, supabaseTable: 'attempts' };
   if (table === 'classes' || table === 'departments' || table === 'institutions') {
-    return { memoryKey: null, supabaseTable: table };
+    return { memoryKey: table, supabaseTable: table };
   }
   if (table === 'audit_logs' || table === 'auditLogs') {
     return { memoryKey: null, supabaseTable: 'audit_logs' };

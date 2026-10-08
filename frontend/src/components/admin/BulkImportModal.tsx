@@ -100,8 +100,147 @@ Dr. John von Neumann, neumann@university.edu, EMP-103, Electronics & Communicati
     XLSX.writeFile(workbook, `${type.toLowerCase()}_import_template.xlsx`);
   };
 
-  const parseCsvContent = (content: string) => {
+  const processRawRows = (rows: string[][]) => {
     setErrorMsg(null);
+    if (!rows || rows.length === 0) {
+      setParsedRecords([]);
+      return;
+    }
+
+    // Clean cells and remove completely empty rows
+    const cleanRows = rows
+      .map((r) => (Array.isArray(r) ? r.map((c) => String(c ?? '').trim()) : []))
+      .filter((r) => r.some((c) => c.length > 0));
+
+    if (cleanRows.length === 0) {
+      setParsedRecords([]);
+      return;
+    }
+
+    // Dynamic header detection
+    let nameIdx = -1;
+    let emailIdx = -1;
+    let idIdx = -1;
+    let deptIdx = -1;
+
+    const firstRow = cleanRows[0];
+    firstRow.forEach((col, idx) => {
+      const lower = col.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (lower.includes('email') || lower.includes('mailid') || lower === 'mail') {
+        emailIdx = idx;
+      } else if (
+        lower.includes('reg') ||
+        lower.includes('roll') ||
+        lower.includes('empid') ||
+        lower.includes('employeeid') ||
+        lower.includes('usn') ||
+        lower.includes('identifier') ||
+        lower === 'id'
+      ) {
+        idIdx = idx;
+      } else if (
+        lower.includes('name') ||
+        lower.includes('student') ||
+        lower.includes('candidate') ||
+        lower.includes('faculty')
+      ) {
+        nameIdx = idx;
+      } else if (lower.includes('dept') || lower.includes('department') || lower.includes('branch') || lower.includes('course')) {
+        deptIdx = idx;
+      }
+    });
+
+    const hasHeader = emailIdx !== -1 || (nameIdx !== -1 && idIdx !== -1);
+    const dataRows = hasHeader ? cleanRows.slice(1) : cleanRows;
+
+    const existingEmails = new Set(existingUsers.map((u) => (u.email || '').toLowerCase().trim()));
+    const seenEmailsInBatch = new Set<string>();
+    const records: ParsedRecord[] = [];
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    dataRows.forEach((row, index) => {
+      let name = '';
+      let email = '';
+      let identifier = '';
+      let department = 'Computer Science & Engineering';
+
+      if (hasHeader) {
+        name = nameIdx !== -1 ? row[nameIdx] || '' : '';
+        email = emailIdx !== -1 ? row[emailIdx] || '' : '';
+        identifier = idIdx !== -1 ? row[idIdx] || '' : '';
+        department = deptIdx !== -1 && row[deptIdx] ? row[deptIdx] : 'Computer Science & Engineering';
+      }
+
+      // If missing via header mapping or no header was present, apply smart heuristic inspection
+      if (!email || !emailRegex.test(email)) {
+        // Find cell containing '@'
+        const foundEmailIdx = row.findIndex((cell) => cell.includes('@'));
+        if (foundEmailIdx !== -1) {
+          email = row[foundEmailIdx].trim();
+          // Map remaining cells: one is identifier, one is name
+          const otherCells = row.map((c, i) => ({ val: c.trim(), idx: i })).filter((c) => c.idx !== foundEmailIdx && c.val.length > 0);
+          for (const cell of otherCells) {
+            // Check if cell is an index like 1, 2, 3
+            if (/^\d{1,3}$/.test(cell.val) && otherCells.length > 2) continue;
+            // Check if alphanumeric register number
+            if (!identifier && (/^[A-Za-z0-9_-]{4,20}$/.test(cell.val) || /\d/.test(cell.val))) {
+              identifier = cell.val;
+            } else if (!name && /[A-Za-z]/.test(cell.val)) {
+              name = cell.val;
+            } else if (!department && cell.val.length > 3) {
+              department = cell.val;
+            }
+          }
+        }
+      }
+
+      if (!name && email) {
+        name = email.split('@')[0].replace(/[._-]/g, ' ');
+      }
+
+      const cleanEmail = email.trim().toLowerCase();
+      const isValidEmail = emailRegex.test(cleanEmail);
+      const isDuplicateInFile = cleanEmail ? seenEmailsInBatch.has(cleanEmail) : false;
+      const isAlreadyInDb = cleanEmail ? existingEmails.has(cleanEmail) : false;
+
+      let isValid = isValidEmail && name.length > 0 && !isDuplicateInFile && !isAlreadyInDb;
+      let validationError: string | undefined;
+
+      if (!cleanEmail) {
+        isValid = false;
+        validationError = 'Missing email';
+      } else if (!isValidEmail) {
+        isValid = false;
+        validationError = 'Invalid email format';
+      } else if (isAlreadyInDb) {
+        isValid = false;
+        validationError = 'Email already registered';
+      } else if (isDuplicateInFile) {
+        isValid = false;
+        validationError = 'Duplicate email in file';
+      } else if (!name) {
+        isValid = false;
+        validationError = 'Missing name';
+      } else {
+        seenEmailsInBatch.add(cleanEmail);
+      }
+
+      records.push({
+        id: `row-${index}-${Date.now()}`,
+        name: name.trim(),
+        email: cleanEmail,
+        identifier: identifier.trim(),
+        department: department.trim(),
+        isValid,
+        validationError,
+      });
+    });
+
+    setParsedRecords(records);
+  };
+
+  const parseCsvContent = (content: string) => {
     if (!content.trim()) {
       setParsedRecords([]);
       return;
@@ -112,77 +251,12 @@ Dr. John von Neumann, neumann@university.edu, EMP-103, Electronics & Communicati
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
 
-    if (lines.length === 0) {
-      setParsedRecords([]);
-      return;
-    }
-
-    // Determine delimiter (comma vs tab)
-    const firstLine = lines[0];
-    const delimiter = firstLine.includes('\t') ? '\t' : ',';
-
-    // Check if first line is a header
-    const lowerFirstLine = firstLine.toLowerCase();
-    const isHeader =
-      lowerFirstLine.includes('name') ||
-      lowerFirstLine.includes('email') ||
-      lowerFirstLine.includes('register') ||
-      lowerFirstLine.includes('employee');
-
-    const dataLines = isHeader ? lines.slice(1) : lines;
-
-    const existingEmails = new Set(existingUsers.map((u) => u.email.toLowerCase()));
-    const seenEmailsInBatch = new Set<string>();
-
-    const records: ParsedRecord[] = [];
-
-    dataLines.forEach((line, index) => {
-      // Split line respecting basic quotes
-      const rawCols = line.split(delimiter).map((col) => col.replace(/^["']|["']$/g, '').trim());
-
-      if (rawCols.length < 2) return; // Skip invalid lines
-
-      const name = rawCols[0] || '';
-      const email = rawCols[1] || '';
-      const identifier = rawCols[2] || ''; // Reg No or Emp ID
-      const department = rawCols[3] || 'Computer Science & Engineering';
-
-      let isValid = true;
-      let validationError: string | undefined;
-
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-      if (!name) {
-        isValid = false;
-        validationError = 'Missing name';
-      } else if (!email) {
-        isValid = false;
-        validationError = 'Missing email';
-      } else if (!emailRegex.test(email)) {
-        isValid = false;
-        validationError = 'Invalid email format';
-      } else if (existingEmails.has(email.toLowerCase())) {
-        isValid = false;
-        validationError = 'Email already registered';
-      } else if (seenEmailsInBatch.has(email.toLowerCase())) {
-        isValid = false;
-        validationError = 'Duplicate email in file';
-      } else {
-        seenEmailsInBatch.add(email.toLowerCase());
-      }
-
-      records.push({
-        id: `row-${index}-${Date.now()}`,
-        name,
-        email,
-        identifier,
-        department,
-        isValid,
-        validationError,
-      });
+    const rows: string[][] = lines.map((line) => {
+      const delimiter = line.includes('\t') ? '\t' : line.includes(';') && !line.includes(',') ? ';' : ',';
+      return line.split(delimiter).map((c) => c.replace(/^["']|["']$/g, '').trim());
     });
 
-    setParsedRecords(records);
+    processRawRows(rows);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -194,21 +268,27 @@ Dr. John von Neumann, neumann@university.edu, EMP-103, Electronics & Communicati
     const reader = new FileReader();
 
     reader.onload = (event) => {
-      if (isBinary) {
-        try {
+      try {
+        if (isBinary) {
           const buffer = new Uint8Array(event.target?.result as ArrayBuffer);
           const workbook = XLSX.read(buffer, { type: 'array' });
+          if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+            setErrorMsg('The Excel file contains no worksheets.');
+            return;
+          }
           const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+          const rawRows = XLSX.utils.sheet_to_json<string[]>(firstSheet, { header: 1, defval: '' });
           const csvText = XLSX.utils.sheet_to_csv(firstSheet);
           setPastedText(csvText);
-          parseCsvContent(csvText);
-        } catch {
-          setErrorMsg('Failed to parse Excel file.');
+          processRawRows(rawRows);
+        } else {
+          const text = event.target?.result as string;
+          setPastedText(text);
+          parseCsvContent(text);
         }
-      } else {
-        const text = event.target?.result as string;
-        setPastedText(text);
-        parseCsvContent(text);
+      } catch (err) {
+        console.error('File parsing error:', err);
+        setErrorMsg('Failed to parse file. Please verify file format.');
       }
     };
 
@@ -217,6 +297,9 @@ Dr. John von Neumann, neumann@university.edu, EMP-103, Electronics & Communicati
     } else {
       reader.readAsText(file);
     }
+
+    // Reset input so re-uploading the same file works
+    e.target.value = '';
   };
 
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {

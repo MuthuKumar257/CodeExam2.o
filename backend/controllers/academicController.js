@@ -94,6 +94,51 @@ export class AcademicController {
     }
   }
 
+  static async updateClass(req, res, next) {
+    try {
+      const classId = req.params.id;
+      if (!classId) return sendError(res, 'Class ID is required.', 400, 'MISSING_FIELDS');
+      if (!memoryStore.classes) memoryStore.classes = [];
+      const idx = memoryStore.classes.findIndex((c) => c.id === classId);
+      if (idx === -1) {
+        return sendError(res, 'Class not found.', 404, 'NOT_FOUND');
+      }
+      const updated = {
+        ...memoryStore.classes[idx],
+        ...req.body,
+        id: classId,
+        updated_at: new Date().toISOString(),
+      };
+      memoryStore.classes[idx] = updated;
+      if (isSupabaseConfigured && supabase) {
+        try {
+          await supabase.from('classes').update(updated).eq('id', classId);
+        } catch {}
+      }
+      return sendSuccess(res, updated, 'Class updated successfully.');
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async deleteClass(req, res, next) {
+    try {
+      const classId = req.params.id;
+      if (!classId) return sendError(res, 'Class ID is required.', 400, 'MISSING_FIELDS');
+      if (!memoryStore.classes) memoryStore.classes = [];
+      memoryStore.classes = memoryStore.classes.filter((c) => c.id !== classId);
+
+      if (isSupabaseConfigured && supabase) {
+        try {
+          await supabase.from('classes').delete().eq('id', classId);
+        } catch {}
+      }
+      return sendSuccess(res, { id: classId, deleted: true }, 'Class deleted successfully.');
+    } catch (err) {
+      next(err);
+    }
+  }
+
   // DEPARTMENTS
   static async getDepartments(req, res, next) {
     try {
@@ -159,6 +204,51 @@ export class AcademicController {
     }
   }
 
+  static async updateDepartment(req, res, next) {
+    try {
+      const deptId = req.params.id;
+      if (!deptId) return sendError(res, 'Department ID is required.', 400, 'MISSING_FIELDS');
+      if (!memoryStore.departments) memoryStore.departments = [];
+      const idx = memoryStore.departments.findIndex((d) => d.id === deptId);
+      if (idx === -1) {
+        return sendError(res, 'Department not found.', 404, 'NOT_FOUND');
+      }
+      const updated = {
+        ...memoryStore.departments[idx],
+        ...req.body,
+        id: deptId,
+        updated_at: new Date().toISOString(),
+      };
+      memoryStore.departments[idx] = updated;
+      if (isSupabaseConfigured && supabase) {
+        try {
+          await supabase.from('departments').update(updated).eq('id', deptId);
+        } catch {}
+      }
+      return sendSuccess(res, updated, 'Department updated successfully.');
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async deleteDepartment(req, res, next) {
+    try {
+      const deptId = req.params.id;
+      if (!deptId) return sendError(res, 'Department ID is required.', 400, 'MISSING_FIELDS');
+      if (!memoryStore.departments) memoryStore.departments = [];
+      memoryStore.departments = memoryStore.departments.filter((d) => d.id !== deptId);
+
+      if (isSupabaseConfigured && supabase) {
+        try {
+          await supabase.from('departments').delete().eq('id', deptId);
+        } catch {}
+      }
+      return sendSuccess(res, { id: deptId, deleted: true }, 'Department deleted successfully.');
+    } catch (err) {
+      next(err);
+    }
+  }
+
   // INSTITUTIONS
   static async getInstitutions(req, res, next) {
     try {
@@ -191,6 +281,51 @@ export class AcademicController {
       const found = (memoryStore.institutions || []).find((i) => i.id === req.params.id);
       if (!found) return sendError(res, 'Institution not found.', 404, 'NOT_FOUND');
       return sendSuccess(res, found);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async updateInstitution(req, res, next) {
+    try {
+      const instId = req.params.id;
+      if (!instId) return sendError(res, 'Institution ID is required.', 400, 'MISSING_FIELDS');
+      if (!memoryStore.institutions) memoryStore.institutions = [];
+      const idx = memoryStore.institutions.findIndex((i) => i.id === instId);
+      if (idx === -1) {
+        return sendError(res, 'Institution not found.', 404, 'NOT_FOUND');
+      }
+      const updated = {
+        ...memoryStore.institutions[idx],
+        ...req.body,
+        id: instId,
+        updated_at: new Date().toISOString(),
+      };
+      memoryStore.institutions[idx] = updated;
+      if (isSupabaseConfigured && supabase) {
+        try {
+          await supabase.from('institutions').update(updated).eq('id', instId);
+        } catch {}
+      }
+      return sendSuccess(res, updated, 'Institution updated successfully.');
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async deleteInstitution(req, res, next) {
+    try {
+      const instId = req.params.id;
+      if (!instId) return sendError(res, 'Institution ID is required.', 400, 'MISSING_FIELDS');
+      if (!memoryStore.institutions) memoryStore.institutions = [];
+      memoryStore.institutions = memoryStore.institutions.filter((i) => i.id !== instId);
+
+      if (isSupabaseConfigured && supabase) {
+        try {
+          await supabase.from('institutions').delete().eq('id', instId);
+        } catch {}
+      }
+      return sendSuccess(res, { id: instId, deleted: true }, 'Institution deleted successfully.');
     } catch (err) {
       next(err);
     }

@@ -261,69 +261,79 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
       (student.registerNo && String(student.registerNo).toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  const parseTextRows = (text: string) => {
-    const lines = text.split(/\r?\n/);
+  const processRawStudentRows = (rows: string[][]) => {
+    if (!rows || rows.length === 0) {
+      setBulkStudents([]);
+      return;
+    }
+
+    const cleanRows = rows
+      .map((r) => (Array.isArray(r) ? r.map((c) => String(c ?? '').trim()) : []))
+      .filter((r) => r.some((c) => c.length > 0));
+
+    if (cleanRows.length === 0) {
+      setBulkStudents([]);
+      return;
+    }
+
     const parsed: ParsedStudent[] = [];
     const existingEmails = new Set(students.map((s) => (s.email || '').toLowerCase().trim()));
     const seenEmailsInBatch = new Set<string>();
 
-    lines.forEach((line) => {
-      const trimmed = line.trim();
-      if (!trimmed) return;
+    let nameIdx = -1;
+    let emailIdx = -1;
+    let regIdx = -1;
 
-      // Detect separator: Tab (Excel paste), Comma, or Semicolon
-      let parts: string[] = [];
-      if (trimmed.includes('\t')) {
-        parts = trimmed.split('\t');
-      } else if (trimmed.includes(';')) {
-        parts = trimmed.split(';');
-      } else {
-        parts = trimmed.split(',');
+    const firstRow = cleanRows[0];
+    firstRow.forEach((col, idx) => {
+      const lower = col.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (lower.includes('email') || lower.includes('mailid') || lower === 'mail') {
+        emailIdx = idx;
+      } else if (lower.includes('reg') || lower.includes('roll') || lower.includes('usn') || lower.includes('identifier') || lower === 'id') {
+        regIdx = idx;
+      } else if (lower.includes('name') || lower.includes('student') || lower.includes('candidate')) {
+        nameIdx = idx;
       }
+    });
 
-      const cleanParts = parts.map((p) => p.trim().replace(/^["']|["']$/g, ''));
-      if (cleanParts.length === 0) return;
+    const hasHeader = emailIdx !== -1 || (nameIdx !== -1 && regIdx !== -1);
+    const dataRows = hasHeader ? cleanRows.slice(1) : cleanRows;
 
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    dataRows.forEach((row) => {
       let name = '';
       let email = '';
       let regNo = '';
 
-      // Intelligent mapping based on parts presence
-      if (cleanParts.length >= 3) {
-        // Assume format: Name, Email, RegisterNo OR RegisterNo, Name, Email
-        if (cleanParts[1].includes('@')) {
-          name = cleanParts[0];
-          email = cleanParts[1];
-          regNo = cleanParts[2];
-        } else if (cleanParts[2].includes('@')) {
-          name = cleanParts[0];
-          regNo = cleanParts[1];
-          email = cleanParts[2];
-        } else {
-          name = cleanParts[0];
-          email = cleanParts[2];
-          regNo = cleanParts[1];
-        }
-      } else if (cleanParts.length === 2) {
-        // Name, Email
-        if (cleanParts[1].includes('@')) {
-          name = cleanParts[0];
-          email = cleanParts[1];
-        } else if (cleanParts[0].includes('@')) {
-          email = cleanParts[0];
-          name = cleanParts[1];
-        }
-      } else {
-        // Just raw line
-        if (cleanParts[0].includes('@')) {
-          email = cleanParts[0];
-          name = cleanParts[0].split('@')[0];
+      if (hasHeader) {
+        name = nameIdx !== -1 ? row[nameIdx] || '' : '';
+        email = emailIdx !== -1 ? row[emailIdx] || '' : '';
+        regNo = regIdx !== -1 ? row[regIdx] || '' : '';
+      }
+
+      // If missing via header mapping, apply smart heuristic inspection
+      if (!email || !emailRegex.test(email)) {
+        const foundEmailIdx = row.findIndex((c) => c.includes('@'));
+        if (foundEmailIdx !== -1) {
+          email = row[foundEmailIdx].trim();
+          const otherCells = row.map((c, i) => ({ val: c.trim(), idx: i })).filter((c) => c.idx !== foundEmailIdx && c.val.length > 0);
+          for (const cell of otherCells) {
+            if (/^\d{1,3}$/.test(cell.val) && otherCells.length > 2) continue; // skip S.No
+            if (!regNo && (/^[A-Za-z0-9_-]{4,20}$/.test(cell.val) || /\d/.test(cell.val))) {
+              regNo = cell.val;
+            } else if (!name && /[A-Za-z]/.test(cell.val)) {
+              name = cell.val;
+            }
+          }
         }
       }
 
-      // Validations
+      if (!name && email) {
+        name = email.split('@')[0].replace(/[._-]/g, ' ');
+      }
+
       const cleanEmail = email.trim().toLowerCase();
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       const isValidEmail = emailRegex.test(cleanEmail);
       const isDuplicateInFile = cleanEmail ? seenEmailsInBatch.has(cleanEmail) : false;
       const isAlreadyInRoster = cleanEmail ? existingEmails.has(cleanEmail) : false;
@@ -350,6 +360,30 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
     setBulkStudents(parsed);
   };
 
+  const parseTextRows = (text: string) => {
+    if (!text.trim()) {
+      setBulkStudents([]);
+      return;
+    }
+
+    const lines = text.split(/\r?\n/);
+    const rows: string[][] = lines.map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return [];
+      let parts: string[] = [];
+      if (trimmed.includes('\t')) {
+        parts = trimmed.split('\t');
+      } else if (trimmed.includes(';') && !trimmed.includes(',')) {
+        parts = trimmed.split(';');
+      } else {
+        parts = trimmed.split(',');
+      }
+      return parts.map((p) => p.trim().replace(/^["']|["']$/g, ''));
+    });
+
+    processRawStudentRows(rows);
+  };
+
   const handleTextPasteChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
     setBulkText(value);
@@ -360,25 +394,27 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const isBinary = !file.name.toLowerCase().endsWith('.csv') && !file.name.toLowerCase().endsWith('.txt');
+    const isBinary = !file.name.toLowerCase().endsWith('.csv') && !file.name.toLowerCase().endsWith('.txt') && !file.name.toLowerCase().endsWith('.tsv');
     const reader = new FileReader();
 
     reader.onload = (event) => {
-      if (isBinary) {
-        try {
+      try {
+        if (isBinary) {
           const buffer = new Uint8Array(event.target?.result as ArrayBuffer);
           const workbook = XLSX.read(buffer, { type: 'array' });
+          if (!workbook.SheetNames || workbook.SheetNames.length === 0) return;
           const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+          const rawRows = XLSX.utils.sheet_to_json<string[]>(firstSheet, { header: 1, defval: '' });
           const csvText = XLSX.utils.sheet_to_csv(firstSheet);
           setBulkText(csvText);
-          parseTextRows(csvText);
-        } catch {
-          setBulkText('');
+          processRawStudentRows(rawRows);
+        } else {
+          const text = event.target?.result as string;
+          setBulkText(text);
+          parseTextRows(text);
         }
-      } else {
-        const text = event.target?.result as string;
-        setBulkText(text);
-        parseTextRows(text);
+      } catch (err) {
+        console.error('File parsing error in CandidatesPage:', err);
       }
     };
 
@@ -387,6 +423,9 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
     } else {
       reader.readAsText(file);
     }
+
+    // Reset input so re-uploading the same file works
+    e.target.value = '';
   };
 
   const handleSingleSubmit = async (e: React.FormEvent) => {
