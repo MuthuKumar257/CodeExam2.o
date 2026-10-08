@@ -40,6 +40,7 @@ import {
   Pause,
   Play,
 } from 'lucide-react';
+import { isStudentUser } from '../../utils/classUtils';
 import {
   Assessment,
   CandidateSession,
@@ -92,7 +93,7 @@ export const FacultyAssessmentsPage: React.FC<FacultyAssessmentsPageProps> = ({
   const [activeDetailTab, setActiveDetailTab] = useState<'OVERVIEW' | 'QUESTIONS' | 'SECURITY' | 'PARTICIPANTS'>('OVERVIEW');
 
   // Candidate users map
-  const candidateUsers = useMemo(() => users.filter((u) => u.role === 'CANDIDATE'), [users]);
+  const candidateUsers = useMemo(() => users.filter(isStudentUser), [users]);
 
   // Helper to find classroom by ID
   const getClassroom = (classId?: string) => {

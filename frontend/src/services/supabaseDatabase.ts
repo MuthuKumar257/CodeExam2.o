@@ -448,12 +448,13 @@ export async function fetchAndSyncAllData(force: boolean = false): Promise<void>
       if (json && json.success && json.data) {
         const { users, assessments, questions, attempts, sessions, submissions, results, classes, departments, institutions, auditLogs, systemSettings, facultySettings, studentSettings } = json.data;
         if (Array.isArray(users)) {
-          localUsers = users;
+          localUsers = deduplicateById(users.filter((user) => user && user.id));
           saveStorage(STORAGE_KEYS.USERS, localUsers);
           notify(listeners.users, localUsers);
         }
         if (Array.isArray(assessments)) {
-          localAssessments = assessments;
+          localAssessments = deduplicateById(assessments.filter((assessment) => assessment && assessment.id))
+            .filter((assessment) => !LEGACY_DEMO_ASSESSMENT_IDS.has(assessment.id));
           saveStorage(STORAGE_KEYS.ASSESSMENTS, localAssessments);
           notify(listeners.assessments, localAssessments);
         }
@@ -546,7 +547,7 @@ export async function fetchAndSyncAllData(force: boolean = false): Promise<void>
         const unpack = (row: any) => row?.data || row;
 
         if (Array.isArray(remoteUsers)) {
-          localUsers = remoteUsers.map(unpack);
+          localUsers = deduplicateById(remoteUsers.map(unpack).filter((user) => user && user.id));
           saveStorage(STORAGE_KEYS.USERS, localUsers);
           notify(listeners.users, localUsers);
         }

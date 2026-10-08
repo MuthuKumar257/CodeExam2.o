@@ -1,5 +1,10 @@
 import { Classroom, User } from '../types';
 
+export function isStudentUser(user: User | null | undefined): boolean {
+  const role = String(user?.role || '').trim().toUpperCase();
+  return role === 'CANDIDATE' || role === 'STUDENT';
+}
+
 export function isStudentAssignedToClass(cls: Classroom, stu: User): boolean {
   if (!cls || !stu) return false;
   const cStudentIds = (cls.studentIds || []).map((id) => String(id).trim().toLowerCase());
@@ -53,7 +58,7 @@ export function syncStudentsToClassroom(cls: Classroom, allUsers: User[]): { upd
   if (!cls) return { updatedClass: cls, updatedUsers: [] };
 
   const matchedStudents = allUsers.filter(
-    (u) => u.role === 'CANDIDATE' && isStudentAssignedToClass(cls, u)
+    (u) => isStudentUser(u) && isStudentAssignedToClass(cls, u)
   );
 
   const matchedIds = matchedStudents.map((s) => s.id);

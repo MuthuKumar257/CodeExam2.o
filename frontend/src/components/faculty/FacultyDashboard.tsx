@@ -3,6 +3,7 @@ import { Video, PlusCircle, CheckCircle, Key, Unlock, Trash2, Loader2, PlayCircl
 import { Assessment, CandidateSession, Classroom, Question, Result, Submission, User } from '../../types';
 import { StudentRankingView } from '../common/StudentRankingView';
 import { ReassignAssessmentModal } from './ReassignAssessmentModal';
+import { isStudentUser } from '../../utils/classUtils';
 
 interface FacultyDashboardProps {
   assessments: Assessment[];
@@ -132,9 +133,13 @@ export const FacultyDashboard: React.FC<FacultyDashboardProps> = ({
       assessments.some((a) => a.id === s.assessmentId)
   ).length;
 
-  const candidateCount =
-    users.filter((u) => u.role === 'CANDIDATE').length ||
-    new Set(sessions.filter((s) => assessments.some((a) => a.id === s.assessmentId)).map((s) => s.candidateId)).size;
+  const candidateCount = new Set([
+    ...users.filter(isStudentUser).map((u) => u.id),
+    ...sessions
+      .filter((s) => assessments.some((a) => a.id === s.assessmentId))
+      .map((s) => s.candidateId)
+      .filter(Boolean),
+  ]).size;
 
   return (
     <div className="p-6 space-y-6">
@@ -249,7 +254,7 @@ export const FacultyDashboard: React.FC<FacultyDashboardProps> = ({
                         </span>
                       )}
                     </td>
-                    <td className="p-3">{asm.candidateIds.length} Enrolled</td>
+                    <td className="p-3">{new Set(asm.candidateIds || []).size} Enrolled</td>
                     <td className="p-3">
                       {effectiveStatus === 'ACTIVE' ? (
                         <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1 w-fit">

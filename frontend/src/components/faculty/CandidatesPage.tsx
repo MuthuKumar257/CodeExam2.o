@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 import { GraduationCap, Mail, Plus, Search, UserPlus, CheckCircle2, FileSpreadsheet, Upload, AlertCircle, Trash2, HelpCircle, Download, Key, Loader2, Edit3, RefreshCw } from 'lucide-react';
 import { Classroom, User } from '../../types';
 import { saveUserToFirestore, saveClassToFirestore } from '../../services/firebase';
-import { isStudentAssignedToClass, syncStudentsToClassroom } from '../../utils/classUtils';
+import { isStudentAssignedToClass, isStudentUser, syncStudentsToClassroom } from '../../utils/classUtils';
 
 interface CandidatesPageProps {
   selectedClass: Classroom | null;
@@ -206,7 +206,7 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
 
   // Find users belonging to this class
   const classStudents = users.filter(
-    (u) => u.role === 'CANDIDATE' && isStudentAssignedToClass(selectedClass, u)
+    (u) => isStudentUser(u) && isStudentAssignedToClass(selectedClass, u)
   );
 
   // Auto sync roster whenever selectedClass or users list changes

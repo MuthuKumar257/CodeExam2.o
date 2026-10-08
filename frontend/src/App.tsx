@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { compressAvatarImage } from './utils/imageCompressor';
 import { Socket } from 'socket.io-client';
 import { createResilientSocket } from './services/socketClient';
+import { isStudentUser } from './utils/classUtils';
 
 import { Header } from './components/common/Header';
 import { Sidebar } from './components/common/Sidebar';
@@ -1555,26 +1556,13 @@ export default function App() {
         questions: asmData.questions || [],
         candidateIds: asmData.candidateIds && asmData.candidateIds.length > 0
           ? asmData.candidateIds
-          : users.filter((u) => u.role === 'CANDIDATE').map((u) => u.id),
+          : users.filter(isStudentUser).map((u) => u.id),
         status: asmData.status || 'ACTIVE',
         createdAt: asmData.createdAt || new Date().toISOString(),
       };
 
       await saveAssessmentToFirestore(newAsm);
       setAssessments((prev) => [newAsm, ...prev.filter((a) => a.id !== newAsm.id)]);
-
-      try {
-        fetch('/api/assessments', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer token`,
-            'X-User-Id': currentUser.id,
-            'X-User-Role': currentUser.role,
-          },
-          body: JSON.stringify(newAsm),
-        }).catch(() => {});
-      } catch {}
 
       setActiveNav('faculty_dashboard');
     } catch (e) {
@@ -1595,19 +1583,6 @@ export default function App() {
       }
       return [updated, ...prev];
     });
-
-    try {
-      fetch(`/api/assessments/${updated.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer token`,
-          'X-User-Id': currentUser?.id || 'admin',
-          'X-User-Role': currentUser?.role || 'FACULTY',
-        },
-        body: JSON.stringify(updated),
-      }).catch(() => {});
-    } catch {}
 
     // Assessment-level status changes do not finalize individual attempts.
     // Each attempt is finalized only by its authoritative server end_time.
@@ -2875,7 +2850,7 @@ export default function App() {
   const analyticsSummary: AnalyticsSummary = {
     totalInstitutions: institutions.length,
     totalFaculty: users.filter((u) => u.role === 'FACULTY').length,
-    totalCandidates: users.filter((u) => u.role === 'CANDIDATE').length,
+    totalCandidates: users.filter(isStudentUser).length,
     activeAssessments: totalActiveSessions,
     completedAssessments: assessments.filter((a) => a.status === 'COMPLETED').length,
     submittedAssessments: totalCompletedSessions,

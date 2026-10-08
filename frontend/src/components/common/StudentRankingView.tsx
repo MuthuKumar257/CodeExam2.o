@@ -20,7 +20,7 @@ import {
   FilterX,
 } from 'lucide-react';
 import { Assessment, CandidateSession, Classroom, Question, Result, Submission, User } from '../../types';
-import { isStudentAssignedToClass } from '../../utils/classUtils';
+import { isStudentAssignedToClass, isStudentUser } from '../../utils/classUtils';
 import {
   getCandidateAliases,
   getCandidateSessionMetrics,
@@ -74,7 +74,7 @@ export const StudentRankingView: React.FC<StudentRankingViewProps> = ({
 
   // Extract candidate students (both from users and synthesized from sessions so none are missed)
   const candidateStudents = useMemo(() => {
-    const fromUsers = users.filter((u) => u.role === 'CANDIDATE');
+    const fromUsers = users.filter(isStudentUser);
     const existingIds = new Set(fromUsers.map((u) => u.id));
     const existingEmails = new Set(
       fromUsers.map((u) => u.email?.toLowerCase()).filter(Boolean)

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { isStudentAssignedToClass, isFacultyAssignedToClass } from '../../utils/classUtils';
+import { isStudentAssignedToClass, isFacultyAssignedToClass, isStudentUser } from '../../utils/classUtils';
 export { isStudentAssignedToClass, isFacultyAssignedToClass };
 import { UserAvatar } from '../common/UserAvatar';
 import {
@@ -388,7 +388,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   );
 
   const facultyMembers = users.filter((u) => u.role === 'FACULTY');
-  const candidateMembers = users.filter((u) => u.role === 'CANDIDATE');
+  const candidateMembers = users.filter(isStudentUser);
 
   // Compute Real Programming Language Distribution strictly from actual submissions
   const realLanguageDistribution = React.useMemo(() => {
@@ -1897,7 +1897,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {classes.map((cls) => {
             const assignedStaff = users.filter((u) => u.role === 'FACULTY' && isFacultyAssignedToClass(cls, u));
-            const assignedStudents = users.filter((u) => u.role === 'CANDIDATE' && isStudentAssignedToClass(cls, u));
+            const assignedStudents = users.filter((u) => isStudentUser(u) && isStudentAssignedToClass(cls, u));
 
             return (
               <div
@@ -2424,7 +2424,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-xs">
           {classes.slice(0, 6).map((c) => {
-            const stuCount = users.filter((u) => u.role === 'CANDIDATE' && isStudentAssignedToClass(c, u)).length;
+            const stuCount = users.filter((u) => isStudentUser(u) && isStudentAssignedToClass(c, u)).length;
             const staffCount = users.filter((u) => u.role === 'FACULTY' && isFacultyAssignedToClass(c, u)).length;
             return (
               <div key={c.id} className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">

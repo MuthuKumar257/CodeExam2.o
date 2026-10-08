@@ -38,6 +38,7 @@ import {
   Settings2,
 } from 'lucide-react';
 import { Assessment, Classroom, User, AssessmentStatus, SecuritySettings, Question } from '../../types';
+import { isStudentUser } from '../../utils/classUtils';
 
 interface ReassignAssessmentModalProps {
   assessment: Assessment | null;
@@ -60,7 +61,7 @@ export const ReassignAssessmentModal: React.FC<ReassignAssessmentModalProps> = (
   onOpenFullEditor,
 }) => {
   // Candidate users
-  const candidateUsers = useMemo(() => users.filter((u) => u.role === 'CANDIDATE'), [users]);
+  const candidateUsers = useMemo(() => users.filter(isStudentUser), [users]);
 
   // Active sub-tab in edit modal: 'general' | 'schedule' | 'security' | 'questions'
   const [activeTab, setActiveTab] = useState<'general' | 'schedule' | 'security' | 'questions'>('general');
