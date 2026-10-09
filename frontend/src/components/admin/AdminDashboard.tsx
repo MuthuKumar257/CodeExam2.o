@@ -80,6 +80,7 @@ interface AdminDashboardProps {
     password?: string;
   }) => Promise<void> | void;
   onDeleteUser?: (userId: string) => Promise<void> | void;
+  onBulkDeleteUsers?: (userIds: string[]) => Promise<void> | void;
   onResetUserPassword?: (userId: string, role: UserRole) => Promise<string> | void;
   onAddClass: (classData: { name: string; staffIds: string[]; studentIds: string[] }) => void;
   onUpdateClass?: (classData: Classroom) => void;
@@ -115,6 +116,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   currentUser,
   onAddUser,
   onDeleteUser,
+  onBulkDeleteUsers,
   onResetUserPassword,
   onAddClass,
   onUpdateClass,
@@ -179,6 +181,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [selectedBulkClassId, setSelectedBulkClassId] = useState<string>('');
   const [isSyncingRoster, setIsSyncingRoster] = useState(false);
   const [rosterSearchTerm, setRosterSearchTerm] = useState('');
+
+  // Bulk Student Deletion state
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  const [isBulkDeletingStudents, setIsBulkDeletingStudents] = useState(false);
+  const [bulkDeleteProgress, setBulkDeleteProgress] = useState({ current: 0, total: 0 });
 
   // Student Edit state
   const [editingStudentUser, setEditingStudentUser] = useState<User | null>(null);
@@ -659,6 +666,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           setDeletingUserId(null);
         }
       }
+    }
+  };
+
+  const handleExecuteBulkDeleteStudents = async () => {
+    if (selectedStudentIds.length === 0) return;
+    setIsBulkDeletingStudents(true);
+    setBulkDeleteProgress({ current: 0, total: selectedStudentIds.length });
+    setUserErrorMsg(null);
+
+    try {
+      if (onBulkDeleteUsers) {
+        await onBulkDeleteUsers(selectedStudentIds);
+      } else if (onDeleteUser) {
+        let count = 0;
+        for (const id of selectedStudentIds) {
+          await onDeleteUser(id);
+          count++;
+          setBulkDeleteProgress({ current: count, total: selectedStudentIds.length });
+        }
+      }
+      const count = selectedStudentIds.length;
+      setSelectedStudentIds([]);
+      setShowBulkDeleteConfirm(false);
+      setUserSuccessMsg(`Successfully deleted ${count} student(s) from the database.`);
+      setTimeout(() => setUserSuccessMsg(null), 5000);
+    } catch (err: any) {
+      setUserErrorMsg(err?.message || 'Failed to delete some students.');
+    } finally {
+      setIsBulkDeletingStudents(false);
     }
   };
 
@@ -1554,10 +1590,66 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         )}
 
+        {/* Bulk Student Actions Toolbar */}
+        {selectedStudentIds.length > 0 && (
+          <div className="p-3 px-4 rounded-xl bg-slate-900 border border-indigo-500/30 flex flex-wrap items-center justify-between gap-3 shadow-lg">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
+              <span className="text-xs font-semibold text-white">
+                <strong className="text-indigo-400">{selectedStudentIds.length}</strong> student(s) selected
+              </span>
+              <span className="text-slate-600">|</span>
+              <button
+                type="button"
+                onClick={() => setSelectedStudentIds([])}
+                className="text-[11px] text-slate-400 hover:text-white underline cursor-pointer"
+              >
+                Deselect all
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={isBulkDeletingStudents}
+                onClick={() => setShowBulkDeleteConfirm(true)}
+                className="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-bold transition shadow-md shadow-rose-600/20 cursor-pointer"
+              >
+                {isBulkDeletingStudents ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="w-3.5 h-3.5" />
+                )}
+                <span>
+                  {isBulkDeletingStudents
+                    ? `Deleting (${bulkDeleteProgress.current}/${bulkDeleteProgress.total})...`
+                    : `Delete Selected (${selectedStudentIds.length})`}
+                </span>
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
           <table className="w-full text-left border-collapse text-xs">
             <thead className="bg-slate-950 text-slate-400 font-semibold border-b border-slate-800">
               <tr>
+                <th className="p-3.5 w-10 text-center">
+                  <input
+                    type="checkbox"
+                    checked={filteredStudents.length > 0 && filteredStudents.every((s) => selectedStudentIds.includes(s.id))}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        const allIds = filteredStudents.map((s) => s.id);
+                        setSelectedStudentIds((prev) => Array.from(new Set([...prev, ...allIds])));
+                      } else {
+                        const currentFilteredSet = new Set(filteredStudents.map((s) => s.id));
+                        setSelectedStudentIds((prev) => prev.filter((id) => !currentFilteredSet.has(id)));
+                      }
+                    }}
+                    className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    title="Select / Deselect all visible students"
+                  />
+                </th>
                 <th className="p-3.5">Student Name</th>
                 <th className="p-3.5">Register No</th>
                 <th className="p-3.5">Email</th>
@@ -1571,7 +1663,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               {filteredStudents.map((stu) => {
                 const stuClasses = classes.filter((c) => isStudentAssignedToClass(c, stu));
                 return (
-                  <tr key={stu.id} className="hover:bg-slate-800/40">
+                  <tr
+                    key={stu.id}
+                    className={`hover:bg-slate-800/40 transition-colors ${
+                      selectedStudentIds.includes(stu.id) ? 'bg-indigo-950/20' : ''
+                    }`}
+                  >
+                    <td className="p-3.5 w-10 text-center">
+                      <input
+                        type="checkbox"
+                        checked={selectedStudentIds.includes(stu.id)}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          if (e.target.checked) {
+                            setSelectedStudentIds((prev) => [...prev, stu.id]);
+                          } else {
+                            setSelectedStudentIds((prev) => prev.filter((id) => id !== stu.id));
+                          }
+                        }}
+                        className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                      />
+                    </td>
                     <td className="p-3.5 font-medium text-white flex items-center gap-2">
                       <UserAvatar
                         name={stu.name}
@@ -1641,6 +1753,55 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </tbody>
           </table>
         </div>
+
+        {/* Bulk Student Deletion Confirmation Modal */}
+        {showBulkDeleteConfirm && (
+          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-md w-full space-y-4 shadow-2xl">
+              <div className="flex items-center space-x-3 text-rose-400">
+                <div className="p-2 rounded-xl bg-rose-500/10 border border-rose-500/20">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Delete Multiple Students?</h3>
+                  <p className="text-xs text-slate-400">This action is permanent and cannot be undone.</p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                You are about to permanently delete <strong className="text-rose-400">{selectedStudentIds.length}</strong> selected student(s).
+                Their accounts, credentials, and class enrollments will be deleted from the database.
+              </p>
+              <div className="flex items-center justify-end space-x-3 pt-2">
+                <button
+                  type="button"
+                  disabled={isBulkDeletingStudents}
+                  onClick={() => setShowBulkDeleteConfirm(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isBulkDeletingStudents}
+                  onClick={handleExecuteBulkDeleteStudents}
+                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-bold transition flex items-center space-x-1.5 shadow-lg shadow-rose-600/20 cursor-pointer"
+                >
+                  {isBulkDeletingStudents ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Deleting {bulkDeleteProgress.current}/{bulkDeleteProgress.total}...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete {selectedStudentIds.length} Students</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Enroll Student Modal */}
         {showAddStudent && (

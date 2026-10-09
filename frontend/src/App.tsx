@@ -1064,6 +1064,40 @@ export default function App() {
     }
   };
 
+  const handleBulkDeleteUsers = async (userIds: string[]) => {
+    if (!userIds || userIds.length === 0) return;
+    const userIdsSet = new Set(userIds);
+
+    for (const userId of userIds) {
+      try {
+        await deleteUserFromFirestore(userId);
+      } catch (err) {
+        console.warn(`Bulk delete user warning for ${userId}:`, err);
+      }
+    }
+
+    setUsers((prev) => prev.filter((u) => !userIdsSet.has(u.id)));
+
+    setClasses((prev) =>
+      prev.map((cls) => {
+        const currentStaff = cls.staffIds || [];
+        const currentFaculty = cls.facultyIds || [];
+        const currentStudents = cls.studentIds || [];
+        const hasStaff = currentStaff.some((id) => userIdsSet.has(id)) || currentFaculty.some((id) => userIdsSet.has(id));
+        const hasStudent = currentStudents.some((id) => userIdsSet.has(id));
+        if (!hasStaff && !hasStudent) return cls;
+        const updated = {
+          ...cls,
+          staffIds: currentStaff.filter((id) => !userIdsSet.has(id)),
+          facultyIds: currentFaculty.filter((id) => !userIdsSet.has(id)),
+          studentIds: currentStudents.filter((id) => !userIdsSet.has(id)),
+        };
+        saveClassToFirestore(updated).catch(console.error);
+        return updated;
+      })
+    );
+  };
+
   // Class Actions -> Firestore
   const handleAddClass = async (classData: { name: string; staffIds: string[]; studentIds: string[] }) => {
     try {
@@ -3160,6 +3194,7 @@ export default function App() {
                 currentUser={currentUser}
                 onAddUser={handleAddUser}
                 onDeleteUser={handleDeleteUser}
+                onBulkDeleteUsers={handleBulkDeleteUsers}
                 onResetUserPassword={handleResetUserPassword}
                 onAddClass={handleAddClass}
                 onUpdateClass={handleUpdateClass}
