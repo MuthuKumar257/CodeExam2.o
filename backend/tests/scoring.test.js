@@ -71,3 +71,4 @@ test('Edge cases and security', async (t) => {
     assert.equal(calculateQuestionScore(0, 10, 20), 0);
   });
 });
+
