@@ -77,6 +77,10 @@ export class QuestionController {
       if (!success) {
         return sendError(res, 'Question not found.', 404, 'QUESTION_NOT_FOUND');
       }
+
+      const { broadcastDatabaseUpdate } = await import('../websocket/testSocket.js');
+      broadcastDatabaseUpdate({ table: 'questions', id: req.params.id, action: 'delete' });
+
       return sendSuccess(res, { id: req.params.id, deleted: true }, 'Question deleted.');
     } catch (err) {
       next(err);
@@ -120,6 +124,10 @@ export class QuestionController {
       if (!success) {
         return sendError(res, 'Testcase not found.', 404, 'NOT_FOUND');
       }
+
+      const { broadcastDatabaseUpdate } = await import('../websocket/testSocket.js');
+      broadcastDatabaseUpdate({ table: 'testcases', id: req.params.id, action: 'delete' });
+
       return sendSuccess(res, { id: req.params.id, deleted: true }, 'Testcase deleted.');
     } catch (err) {
       next(err);

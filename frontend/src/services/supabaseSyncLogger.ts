@@ -460,6 +460,17 @@ class SupabaseSyncLogger {
       }
     } catch {}
 
+    // Attach active user credentials from local session
+    try {
+      const rawUser = typeof window !== 'undefined' ? localStorage.getItem('codeguard_current_user') : null;
+      if (rawUser) {
+        const u = JSON.parse(rawUser);
+        if (u?.id && !headers['x-user-id']) headers['x-user-id'] = u.id;
+        if (u?.role && !headers['x-user-role']) headers['x-user-role'] = u.role;
+        if (u?.institutionId && !headers['x-user-institution']) headers['x-user-institution'] = u.institutionId;
+      }
+    } catch {}
+
     const headerAudit = this.auditHeaders(headers, currentConcurrency, concurrencyIdx, traceId);
 
     if (hasCollision && previousInFlight) {
@@ -539,10 +550,26 @@ class SupabaseSyncLogger {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s backend timeout
 
-          const response = await fetch('/api/db/save', {
-            method: 'POST',
+          const isDelete = action === 'DELETE';
+          let endpoint: string;
+          if (isDelete) {
+            if (table === 'users') endpoint = `/api/users/${encodeURIComponent(recordId)}`;
+            else if (table === 'students') endpoint = `/api/students/${encodeURIComponent(recordId)}`;
+            else if (table === 'faculty') endpoint = `/api/faculty/${encodeURIComponent(recordId)}`;
+            else if (table === 'classes') endpoint = `/api/classes/${encodeURIComponent(recordId)}`;
+            else if (table === 'departments') endpoint = `/api/departments/${encodeURIComponent(recordId)}`;
+            else if (table === 'institutions') endpoint = `/api/institutions/${encodeURIComponent(recordId)}`;
+            else if (table === 'questions') endpoint = `/api/questions/${encodeURIComponent(recordId)}`;
+            else if (table === 'assessments' || table === 'tests') endpoint = `/api/tests/${encodeURIComponent(recordId)}`;
+            else endpoint = `/api/db/${encodeURIComponent(table)}/${encodeURIComponent(recordId)}`;
+          } else {
+            endpoint = '/api/db/save';
+          }
+
+          const response = await fetch(endpoint, {
+            method: isDelete ? 'DELETE' : 'POST',
             headers,
-            body: JSON.stringify({ table, id: recordId, data }),
+            body: isDelete ? undefined : JSON.stringify({ table, id: recordId, data }),
             signal: controller.signal,
           });
 

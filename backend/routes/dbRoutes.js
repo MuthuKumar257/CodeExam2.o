@@ -22,6 +22,15 @@ function resolveTable(table) {
   if (table === 'classes' || table === 'departments' || table === 'institutions') {
     return { memoryKey: table, supabaseTable: table };
   }
+  if (table === 'students' || table === 'faculty') {
+    return { memoryKey: 'users', supabaseTable: 'users' };
+  }
+  if (table === 'tests') {
+    return { memoryKey: 'tests', supabaseTable: 'assessments' };
+  }
+  if (table === 'testcases') {
+    return { memoryKey: 'testcases', supabaseTable: 'testcases' };
+  }
   if (table === 'audit_logs' || table === 'auditLogs') {
     return { memoryKey: null, supabaseTable: 'audit_logs' };
   }
@@ -56,6 +65,13 @@ function saveInMemory(table, id, data, config) {
   if (!config.memoryKey) return data;
 
   const records = memoryStore[config.memoryKey];
+  if (data && data.deleted === true) {
+    if (Array.isArray(records)) {
+      memoryStore[config.memoryKey] = records.filter((record) => String(record.id) !== String(id));
+    }
+    return { id, deleted: true };
+  }
+
   const index = records.findIndex((record) => String(record.id) === String(id));
   const saved = index === -1 ? { ...data, id } : { ...records[index], ...data, id };
   if (index === -1) records.push(saved);
@@ -149,6 +165,18 @@ router.post('/save', async (req, res, next) => {
       return sendError(res, 'A supported table, record id, and object data are required.', 400, 'INVALID_DB_WRITE');
     }
 
+    // Check if client dispatched a DELETE action masquerading as a save
+    if (data.deleted === true) {
+      saveInMemory(table, id, data, config);
+      if (isSupabaseConfigured && supabase) {
+        try {
+          await supabase.from(config.supabaseTable).delete().eq('id', id);
+        } catch {}
+      }
+      broadcastDatabaseUpdate({ table, id: String(id), action: 'delete' });
+      return sendSuccess(res, { id, deleted: true, resolvedTable: config.supabaseTable });
+    }
+
     const saved = saveInMemory(table, id, data, config);
     let supabaseStatus = null;
     let supabaseError = null;
@@ -192,7 +220,7 @@ router.post('/save', async (req, res, next) => {
   }
 });
 
-router.delete('/:table/:id', authenticate, requireRole('ADMIN'), async (req, res, next) => {
+router.delete('/:table/:id', authenticate, async (req, res, next) => {
   try {
     const { table, id } = req.params;
     const config = resolveTable(table);
@@ -201,10 +229,21 @@ router.delete('/:table/:id', authenticate, requireRole('ADMIN'), async (req, res
       return sendError(res, 'A supported table and record id are required.', 400, 'INVALID_DB_DELETE');
     }
 
-    if (table === 'users') {
+    const role = String(req.user?.role || '').toUpperCase();
+    const facultyAllowedTables = ['classes', 'questions', 'testcases', 'assessments', 'tests', 'students', 'users'];
+    if (role !== 'ADMIN') {
+      if (!facultyAllowedTables.includes(table) || role !== 'FACULTY') {
+        return sendError(res, 'You do not have permission to delete this record.', 403, 'FORBIDDEN');
+      }
+    }
+
+    if (table === 'users' || table === 'students') {
       const user = memoryStore.users.find((record) => String(record.id) === String(id));
-      if (user?.role === 'ADMIN') {
+      if (user?.role === 'ADMIN' && user.id === 'usr-admin') {
         return sendError(res, 'The administrator account cannot be deleted.', 403, 'ADMIN_DELETE_FORBIDDEN');
+      }
+      if (role === 'FACULTY' && user?.role === 'ADMIN') {
+        return sendError(res, 'Faculty members cannot delete administrator accounts.', 403, 'FORBIDDEN');
       }
     }
 
@@ -215,18 +254,33 @@ router.delete('/:table/:id', authenticate, requireRole('ADMIN'), async (req, res
       }
     }
 
+    // Cascade cleanups
+    if (table === 'users' || table === 'students' || table === 'faculty') {
+      if (Array.isArray(memoryStore.classes)) {
+        memoryStore.classes.forEach((cls) => {
+          if (Array.isArray(cls.studentIds)) cls.studentIds = cls.studentIds.filter((cid) => cid !== id);
+          if (Array.isArray(cls.staffIds)) cls.staffIds = cls.staffIds.filter((cid) => cid !== id);
+          if (Array.isArray(cls.facultyIds)) cls.facultyIds = cls.facultyIds.filter((cid) => cid !== id);
+        });
+      }
+    } else if (table === 'classes') {
+      if (Array.isArray(memoryStore.users)) {
+        memoryStore.users.forEach((u) => {
+          if (Array.isArray(u.classIds)) u.classIds = u.classIds.filter((cid) => cid !== id);
+        });
+      }
+    }
+
     let supabaseWarning = null;
     if (isSupabaseConfigured && supabase) {
       const { error } = await supabase.from(config.supabaseTable).delete().eq('id', id);
       if (error?.code === 'PGRST205') {
         supabaseWarning = `Supabase table "${config.supabaseTable}" is not provisioned; deleted from backend memory only.`;
-      } else if (error) {
-        return next(error);
       }
     }
 
     broadcastDatabaseUpdate({ table, id: String(id), action: 'delete' });
-    return sendSuccess(res, { id, deleted: true, supabaseWarning });
+    return sendSuccess(res, { id, deleted: true, supabaseWarning }, 'Record deleted successfully.');
   } catch (error) {
     return next(error);
   }

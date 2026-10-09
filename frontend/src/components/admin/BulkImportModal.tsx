@@ -309,6 +309,16 @@ Dr. John von Neumann, neumann@university.edu, EMP-103, Electronics & Communicati
     parseCsvContent(text);
   };
 
+  const handleClose = () => {
+    setPastedText('');
+    setParsedRecords([]);
+    setSelectedClassIds([]);
+    setFileName(null);
+    setErrorMsg(null);
+    setImportProgress({ current: 0, total: 0 });
+    onClose();
+  };
+
   const handleStartImport = async () => {
     const validRecords = parsedRecords.filter((r) => r.isValid);
     if (validRecords.length === 0) {
@@ -339,6 +349,7 @@ Dr. John von Neumann, neumann@university.edu, EMP-103, Electronics & Communicati
         if (isStudent) {
           userData.registerNumber = rec.identifier;
           userData.registerNo = rec.identifier;
+          (userData as any).register_number = rec.identifier;
         } else {
           userData.employeeId = rec.identifier;
         }
@@ -352,6 +363,12 @@ Dr. John von Neumann, neumann@university.edu, EMP-103, Electronics & Communicati
     }
 
     setIsImporting(false);
+    setPastedText('');
+    setParsedRecords([]);
+    setSelectedClassIds([]);
+    setFileName(null);
+    setErrorMsg(null);
+    setImportProgress({ current: 0, total: 0 });
     onSuccess(importedCount);
     onClose();
   };
@@ -383,7 +400,7 @@ Dr. John von Neumann, neumann@university.edu, EMP-103, Electronics & Communicati
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             disabled={isImporting}
             className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition disabled:opacity-50"
           >
@@ -590,7 +607,7 @@ Dr. John von Neumann, neumann@university.edu, EMP-103, Electronics & Communicati
           <div className="flex items-center space-x-2">
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleClose}
               disabled={isImporting}
               className="px-4 py-2 rounded-xl text-xs bg-slate-800 text-slate-300 hover:bg-slate-700 transition disabled:opacity-50 cursor-pointer"
             >

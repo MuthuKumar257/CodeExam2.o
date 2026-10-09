@@ -75,7 +75,7 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
     setEditingStudent(student);
     setEditName(student.name || '');
     setEditEmail(student.email || '');
-    setEditRegNo(student.registerNumber || student.registerNo || '');
+    setEditRegNo(student.registerNumber || student.registerNo || (student as any).register_number || '');
     setEditDept(student.department || '');
   };
 
@@ -86,12 +86,14 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
     setIsSavingEdit(true);
     setActionErrorMsg('');
     try {
+      const regValue = editRegNo.trim();
       const updatedUser: User = {
         ...editingStudent,
         name: editName.trim(),
         email: editEmail.trim(),
-        registerNumber: editRegNo.trim().toUpperCase(),
-        registerNo: editRegNo.trim().toUpperCase(),
+        registerNumber: regValue || undefined,
+        registerNo: regValue || undefined,
+        ...((regValue ? { register_number: regValue } : { register_number: undefined }) as any),
         department: editDept.trim(),
       };
 
@@ -254,12 +256,15 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
     };
   }, [selectedClass, users, onUpdateClass, onUpdateUser]);
 
-  const filteredStudents = classStudents.filter(
-    (student) =>
-      (student.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (student.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (student.registerNo && String(student.registerNo).toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const filteredStudents = classStudents.filter((student) => {
+    const reg = student.registerNumber || student.registerNo || (student as any).register_number || '';
+    const term = searchTerm.toLowerCase();
+    return (
+      (student.name || '').toLowerCase().includes(term) ||
+      (student.email || '').toLowerCase().includes(term) ||
+      (reg && String(reg).toLowerCase().includes(term))
+    );
+  });
 
   const processRawStudentRows = (rows: string[][]) => {
     if (!rows || rows.length === 0) {
@@ -438,7 +443,7 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
       await onAddStudent(selectedClass.id, {
         name: newStudentName.trim(),
         email: newStudentEmail.trim().toLowerCase(),
-        registerNo: newStudentRegisterNo ? newStudentRegisterNo.toUpperCase().trim() : undefined,
+        registerNo: newStudentRegisterNo ? newStudentRegisterNo.trim() : undefined,
       });
       setSuccessMsg('Student successfully registered and added to this classroom!');
       setNewStudentName('');
@@ -469,7 +474,7 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
         await onAddStudent(selectedClass.id, {
           name: student.name.trim(),
           email: student.email.trim().toLowerCase(),
-          registerNo: student.registerNo ? student.registerNo.toUpperCase().trim() : undefined,
+          registerNo: student.registerNo ? student.registerNo.trim() : undefined,
         });
         setImportProgress({ current: i + 1, total: validStudents.length });
       }
@@ -629,7 +634,7 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
                       </div>
                     </td>
                     <td className="p-3.5 font-mono text-indigo-400 font-bold uppercase text-xs">
-                      {student.registerNo || (
+                      {student.registerNumber || student.registerNo || (student as any).register_number || (
                         <span className="text-slate-600 italic text-[11px] font-normal">N/A</span>
                       )}
                     </td>

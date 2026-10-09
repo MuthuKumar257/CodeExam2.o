@@ -278,7 +278,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setEditingStudentUser(stu);
     setEditStuName(stu.name || '');
     setEditStuEmail(stu.email || '');
-    setEditStuRegNo(stu.registerNumber || stu.registerNo || '');
+    setEditStuRegNo(stu.registerNumber || stu.registerNo || (stu as any).register_number || '');
     setEditStuDept(stu.department || 'Computer Science & Engineering');
     const assigned = classes
       .filter((c) => isStudentAssignedToClass(c, stu))
@@ -300,12 +300,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       const singleClassIds = editStuClassIds.slice(-1);
       const chosenClassId = singleClassIds[0] || null;
 
+      const regVal = editStuRegNo.trim();
       const updatedUser: User = {
         ...editingStudentUser,
         name: editStuName.trim(),
         email: editStuEmail.trim(),
-        registerNumber: editStuRegNo.trim().toUpperCase(),
-        registerNo: editStuRegNo.trim().toUpperCase(),
+        registerNumber: regVal || undefined,
+        registerNo: regVal || undefined,
+        ...((regVal ? { register_number: regVal } : { register_number: undefined }) as any),
         department: editStuDept.trim(),
         classIds: singleClassIds,
         isActive: editStuIsActive,
@@ -616,11 +618,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setIsSubmittingUser(true);
     setUserErrorMsg(null);
     try {
+      const regVal = newStuRegNo.trim();
       await onAddUser({
         name: newStuName.trim(),
         email: newStuEmail.trim(),
         role: 'CANDIDATE',
-        registerNumber: newStuRegNo.trim() || `REG${Date.now().toString().slice(-4)}`,
+        registerNumber: regVal || undefined,
+        registerNo: regVal || undefined,
+        ...(regVal ? { register_number: regVal } : {}),
         department: newStuDept.trim(),
         classIds: newStuClassIds,
         password: 'Student@123',
@@ -1479,12 +1484,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // 4. STUDENTS DIRECTORY
   if (activeSubNav === 'admin_students') {
-    const filteredStudents = candidateMembers.filter(
-      (s) =>
-        (s.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (s.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (s.registerNumber && String(s.registerNumber).toLowerCase().includes(searchTerm.toLowerCase()))
-    );
+    const filteredStudents = candidateMembers.filter((s) => {
+      const reg = s.registerNumber || s.registerNo || (s as any).register_number || '';
+      const term = searchTerm.toLowerCase();
+      return (
+        (s.name || '').toLowerCase().includes(term) ||
+        (s.email || '').toLowerCase().includes(term) ||
+        (reg && String(reg).toLowerCase().includes(term))
+      );
+    });
 
     return (
       <div className="p-6 space-y-6">
@@ -1574,7 +1582,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       {stu.name}
                     </td>
                     <td className="p-3.5 font-mono text-indigo-400 font-semibold">
-                      {stu.registerNumber || stu.registerNo || 'N/A'}
+                      {stu.registerNumber || stu.registerNo || (stu as any).register_number || 'N/A'}
                     </td>
                     <td className="p-3.5 text-slate-400">{stu.email}</td>
                     <td className="p-3.5 text-slate-300">{stu.department || 'General'}</td>

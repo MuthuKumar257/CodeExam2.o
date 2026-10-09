@@ -460,6 +460,20 @@ let isFetchingQuestions = false;
 let isFetchingSessions = false;
 let isFetchingSubmissions = false;
 
+export function normalizeUserFields(user: any): User {
+  if (!user || typeof user !== 'object') return user;
+  const rawReg = user.registerNumber ?? user.register_number ?? user.registerNo ?? user.rollNumber;
+  const regNumber = rawReg !== undefined && rawReg !== null ? String(rawReg).trim() : '';
+
+  return {
+    ...user,
+    registerNumber: regNumber,
+    registerNo: regNumber,
+    register_number: regNumber,
+    email: user.email ? String(user.email).trim().toLowerCase() : '',
+  };
+}
+
 export async function fetchModularStudents(): Promise<void> {
   if (isAssessmentActive() || isFetchingUsers) return;
   isFetchingUsers = true;
@@ -471,7 +485,9 @@ export async function fetchModularStudents(): Promise<void> {
     }
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
-      localUsers = mergeArraySmart(localUsers, json.data);
+      const serverStudents = json.data.map(normalizeUserFields);
+      const nonStudents = localUsers.filter((u) => !isStudentUser(u));
+      localUsers = deduplicateById([...nonStudents, ...serverStudents]);
       saveStorage(STORAGE_KEYS.USERS, localUsers);
       notify(listeners.users, localUsers);
     }
@@ -489,7 +505,9 @@ export async function fetchModularFaculty(): Promise<void> {
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
-      localUsers = mergeArraySmart(localUsers, json.data);
+      const serverFaculty = json.data.map(normalizeUserFields);
+      const nonFaculty = localUsers.filter((u) => isStudentUser(u) || String(u.role).toUpperCase() === 'ADMIN');
+      localUsers = deduplicateById([...nonFaculty, ...serverFaculty]);
       saveStorage(STORAGE_KEYS.USERS, localUsers);
       notify(listeners.users, localUsers);
     }
@@ -506,7 +524,7 @@ export async function fetchModularClasses(): Promise<void> {
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
-      localClasses = mergeArraySmart(localClasses, json.data);
+      localClasses = deduplicateById(json.data);
       saveStorage(STORAGE_KEYS.CLASSES, localClasses);
       notify(listeners.classes, localClasses);
     }
@@ -525,7 +543,7 @@ export async function fetchModularDepartments(): Promise<void> {
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
-      localDepartments = mergeArraySmart(localDepartments, json.data);
+      localDepartments = deduplicateById(json.data);
       saveStorage(STORAGE_KEYS.DEPARTMENTS, localDepartments);
       notify(listeners.departments, localDepartments);
     }
@@ -544,7 +562,7 @@ export async function fetchModularInstitutions(): Promise<void> {
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
-      localInstitutions = mergeArraySmart(localInstitutions, json.data);
+      localInstitutions = deduplicateById(json.data);
       saveStorage(STORAGE_KEYS.INSTITUTIONS, localInstitutions);
       notify(listeners.institutions, localInstitutions);
     }
@@ -563,9 +581,8 @@ export async function fetchModularAssessments(): Promise<void> {
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
-      localAssessments = mergeArraySmart(
-        localAssessments,
-        json.data.filter((a: any) => !LEGACY_DEMO_ASSESSMENT_IDS.has(a.id))
+      localAssessments = deduplicateById(
+        json.data.filter((a: any) => !a.is_deleted && a.status !== 'DELETED' && !LEGACY_DEMO_ASSESSMENT_IDS.has(a.id))
       );
       saveStorage(STORAGE_KEYS.ASSESSMENTS, localAssessments);
       notify(listeners.assessments, localAssessments);
@@ -585,7 +602,7 @@ export async function fetchModularQuestions(): Promise<void> {
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
-      localQuestions = mergeArraySmart(localQuestions, json.data);
+      localQuestions = deduplicateById(json.data);
       saveStorage(STORAGE_KEYS.QUESTIONS, localQuestions);
       notify(listeners.questions, localQuestions);
     }
@@ -1230,7 +1247,15 @@ export async function deleteClassFromFirestore(classId: string): Promise<void> {
   saveStorage(STORAGE_KEYS.CLASSES, localClasses);
   notify(listeners.classes, localClasses);
 
-  deleteFromBackend('classes', classId);
+  // Clean up classId from local users
+  localUsers = localUsers.map((u) => ({
+    ...u,
+    classIds: (u.classIds || []).filter((id) => id !== classId),
+  }));
+  saveStorage(STORAGE_KEYS.USERS, localUsers);
+  notify(listeners.users, localUsers);
+
+  await deleteFromBackend('classes', classId);
 }
 
 // DEPARTMENTS SUBSCRIPTION & PERSISTENCE
@@ -1262,7 +1287,7 @@ export async function deleteDepartmentFromFirestore(deptId: string): Promise<voi
   saveStorage(STORAGE_KEYS.DEPARTMENTS, localDepartments);
   notify(listeners.departments, localDepartments);
 
-  deleteFromBackend('departments', deptId);
+  await deleteFromBackend('departments', deptId);
 }
 
 // ASSESSMENTS SUBSCRIPTION & PERSISTENCE
@@ -1361,7 +1386,7 @@ export async function deleteQuestionFromFirestore(qId: string): Promise<void> {
   saveStorage(STORAGE_KEYS.QUESTIONS, localQuestions);
   notify(listeners.questions, localQuestions);
 
-  deleteFromBackend('questions', qId);
+  await deleteFromBackend('questions', qId);
 }
 
 // SESSIONS & ATTEMPTS SUBSCRIPTION & PERSISTENCE
@@ -1717,6 +1742,14 @@ export async function saveInstitutionToFirestore(inst: Institution): Promise<voi
   notify(listeners.institutions, localInstitutions);
 
   persistToBackend('institutions', inst.id, cleaned);
+}
+
+export async function deleteInstitutionFromFirestore(instId: string): Promise<void> {
+  localInstitutions = localInstitutions.filter((i) => i.id !== instId);
+  saveStorage(STORAGE_KEYS.INSTITUTIONS, localInstitutions);
+  notify(listeners.institutions, localInstitutions);
+
+  await deleteFromBackend('institutions', instId);
 }
 
 // Backward-compatible dummy auth and db objects for any legacy references

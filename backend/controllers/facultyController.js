@@ -110,6 +110,30 @@ export class FacultyController {
         } catch {}
       }
 
+      // Cascade remove faculty from classes
+      if (Array.isArray(memoryStore.classes)) {
+        for (const cls of memoryStore.classes) {
+          let modified = false;
+          if (Array.isArray(cls.staffIds) && cls.staffIds.includes(req.params.id)) {
+            cls.staffIds = cls.staffIds.filter((id) => id !== req.params.id);
+            modified = true;
+          }
+          if (Array.isArray(cls.facultyIds) && cls.facultyIds.includes(req.params.id)) {
+            cls.facultyIds = cls.facultyIds.filter((id) => id !== req.params.id);
+            modified = true;
+          }
+          if (modified && isSupabaseConfigured && supabase) {
+            try {
+              await supabase.from('classes').update(cls).eq('id', cls.id);
+            } catch {}
+          }
+        }
+      }
+
+      const { broadcastDatabaseUpdate } = await import('../websocket/testSocket.js');
+      broadcastDatabaseUpdate({ table: 'users', id: req.params.id, action: 'delete' });
+      broadcastDatabaseUpdate({ table: 'faculty', id: req.params.id, action: 'delete' });
+
       return sendSuccess(res, { id: req.params.id, deleted: true }, 'Faculty member deleted.');
     } catch (err) {
       next(err);

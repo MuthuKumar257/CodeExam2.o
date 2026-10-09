@@ -314,7 +314,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
 
     return {
       user,
-      registerNo: s.candidateRegisterNo || user?.registerNumber || user?.registerNo || user?.rollNumber || 'REG-STD',
+      registerNo: s.candidateRegisterNo || user?.registerNumber || user?.registerNo || (user as any)?.register_number || user?.rollNumber || '',
       className: userClass ? userClass.name : currentAssessmentClass?.name || 'General',
       section: userClass?.section || currentAssessmentClass?.section || user?.section || 'A',
       department: user?.department || userClass?.department || currentAssessmentClass?.department || 'Computer Science',
@@ -366,8 +366,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
           const q = studentSearchQuery.toLowerCase();
           const matchName = (s.candidateName || data.user?.name || '').toLowerCase().includes(q);
           const matchEmail = (s.candidateEmail || data.user?.email || '').toLowerCase().includes(q);
-          const matchReg = data.registerNo.toLowerCase().includes(q);
-          const matchClass = data.className.toLowerCase().includes(q);
+          const matchReg = (data.registerNo || '').toLowerCase().includes(q);
+          const matchClass = (data.className || '').toLowerCase().includes(q);
           return matchName || matchEmail || matchReg || matchClass;
         }
 
@@ -380,7 +380,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
         } else if (studentSortBy === 'NAME') {
           comp = (a.session.candidateName || '').localeCompare(b.session.candidateName || '');
         } else if (studentSortBy === 'ROLL') {
-          comp = a.data.registerNo.localeCompare(b.data.registerNo);
+          comp = (a.data.registerNo || '').localeCompare(b.data.registerNo || '');
         } else if (studentSortBy === 'SCORE') {
           comp = a.data.score - b.data.score;
         } else if (studentSortBy === 'PERCENTAGE') {
@@ -1016,7 +1016,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
 
                       {/* 3. Register / Roll Number */}
                       <td className="p-4 font-mono font-bold text-indigo-400 uppercase">
-                        {data.registerNo}
+                        {data.registerNo || 'N/A'}
                       </td>
 
                       {/* 4. Class */}
@@ -1192,7 +1192,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                     <h3 className="text-base font-bold text-white flex items-center gap-2">
                       <span>{detailedReportSession.candidateName || studentData.user?.name || 'Candidate Performance'}</span>
                       <span className="font-mono text-xs px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-400 border border-indigo-500/25">
-                        {studentData.registerNo}
+                        {studentData.registerNo || 'N/A'}
                       </span>
                       <span className="font-mono text-xs px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/25">
                         Rank #{studentRank}

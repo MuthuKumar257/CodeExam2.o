@@ -1034,17 +1034,12 @@ export default function App() {
   const handleDeleteUser = async (userId: string) => {
     if (!userId) throw new Error('Invalid user ID provided.');
     try {
-      if (auth.currentUser && !auth.currentUser.isAnonymous) {
-        try {
-          await deleteResource('users', userId);
-        } catch (apiErr) {
-          const status = (apiErr as Error & { status?: number }).status;
-          if (status !== 503) throw apiErr;
-          await deleteUserFromFirestore(userId);
-        }
-      } else {
-        await deleteUserFromFirestore(userId);
+      try {
+        await deleteResource('users', userId);
+      } catch (apiErr) {
+        console.warn('API delete user warning:', apiErr);
       }
+      await deleteUserFromFirestore(userId);
 
       // State update
       setUsers((prev) => prev.filter((u) => u.id !== userId));

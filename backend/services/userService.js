@@ -11,6 +11,11 @@ export class UserService {
     return email.trim().toLowerCase();
   }
 
+  static normalizeRegisterNumber(val) {
+    if (val === undefined || val === null) return '';
+    return String(val).trim();
+  }
+
   /**
    * Scans for existing duplicate emails in the database, merges associations
    * (sessions, attempts, submissions, history) into a single primary record,
@@ -152,6 +157,8 @@ export class UserService {
     password,
     role = 'STUDENT',
     register_number,
+    registerNumber,
+    registerNo,
     department,
     institution_id = 'inst-01',
     extraFields = {},
@@ -194,19 +201,30 @@ export class UserService {
       const hashedPassword = await bcrypt.hash(password || defaultPass, 10);
       const userId = `usr-${role.toLowerCase()}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
+      const rawReg = register_number !== undefined
+        ? register_number
+        : (registerNumber !== undefined
+            ? registerNumber
+            : (registerNo !== undefined
+                ? registerNo
+                : (extraFields?.registerNumber !== undefined ? extraFields.registerNumber : extraFields?.registerNo)));
+      const regStr = rawReg !== undefined && rawReg !== null ? String(rawReg).trim() : '';
+
       const newUser = {
+        ...extraFields,
         id: userId,
         name: name.trim(),
         email: normalizedEmail,
         email_normalized: normalizedEmail,
         password: hashedPassword,
         role: role.toUpperCase(),
-        register_number: register_number || `REG-${Date.now().toString().slice(-4)}`,
+        register_number: regStr,
+        registerNumber: regStr,
+        registerNo: regStr,
         department: department || 'Computer Science & Engineering',
         institution_id,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
-        ...extraFields,
       };
 
       memoryStore.users.push(newUser);
@@ -279,14 +297,21 @@ export class UserService {
         alreadyRegistered.push({ email: candidate.email, name: candidate.name, existingId: existing.id });
       } else {
         try {
+          const rawReg = candidate.register_number ?? candidate.registerNumber ?? candidate.registerNo;
+          const regStr = rawReg !== undefined && rawReg !== null ? String(rawReg).trim() : '';
+
           const created = await this.createUser({
             name: candidate.name || 'Student',
             email: candidate.email,
             password: candidate.password,
             role: 'STUDENT',
-            register_number: candidate.register_number || candidate.registerNumber,
+            register_number: regStr,
             department: candidate.department,
             institution_id: candidate.institution_id || candidate.institutionId || 'inst-01',
+            extraFields: {
+              registerNumber: regStr,
+              registerNo: regStr,
+            },
           });
           imported.push(created);
         } catch (err) {
@@ -327,6 +352,19 @@ export class UserService {
       users = users.filter((u) => u.department === department);
     }
 
+    // Helper to normalize user fields
+    const normalizeUser = (u) => {
+      const { password: _, ...safe } = u;
+      const rawReg = safe.register_number ?? safe.registerNumber ?? safe.registerNo ?? safe.rollNumber;
+      const reg = rawReg !== undefined && rawReg !== null ? String(rawReg).trim() : '';
+      return {
+        ...safe,
+        register_number: reg,
+        registerNumber: reg,
+        registerNo: reg,
+      };
+    };
+
     // If Supabase is available and has users table, query it with pagination
     if (isSupabaseConfigured && supabase) {
       try {
@@ -339,7 +377,7 @@ export class UserService {
         const { data, count, error } = await query.range(from, to);
 
         if (!error && Array.isArray(data)) {
-          const safeData = data.map(({ password: _, ...u }) => u);
+          const safeData = data.map(normalizeUser);
           const total = count ?? safeData.length;
           return {
             data: safeData,
@@ -358,7 +396,7 @@ export class UserService {
 
     const total = users.length;
     const startIndex = (p - 1) * l;
-    const paginated = users.slice(startIndex, startIndex + l).map(({ password: _, ...u }) => u);
+    const paginated = users.slice(startIndex, startIndex + l).map(normalizeUser);
 
     return {
       data: paginated,

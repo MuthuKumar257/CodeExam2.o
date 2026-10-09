@@ -273,6 +273,9 @@ export const memoryStore = {
   questions: isProduction ? [] : [...defaultQuestions],
   testcases: isProduction ? [] : [...defaultTestcases],
   tests: [],
+  classes: [],
+  departments: [],
+  institutions: [],
   sessions: [],
   submissions: [],
   settings: {

@@ -33,15 +33,23 @@ export class StudentController {
 
   static async createStudent(req, res, next) {
     try {
-      const { email, name, password, register_number, department, institution_id } = req.body;
+      const { email, name, password, department, institution_id, ...extra } = req.body;
+      const rawReg = req.body.register_number ?? req.body.registerNumber ?? req.body.registerNo;
+      const reg = rawReg !== undefined && rawReg !== null ? String(rawReg).trim() : '';
+
       const created = await UserService.createUser({
         name,
         email,
         password,
         role: 'STUDENT',
-        register_number,
+        register_number: reg,
         department,
         institution_id,
+        extraFields: {
+          registerNumber: reg,
+          registerNo: reg,
+          ...extra,
+        },
       });
       return sendSuccess(res, created, 'Student created successfully.', 201);
     } catch (err) {
@@ -70,7 +78,7 @@ export class StudentController {
 
   static async updateStudent(req, res, next) {
     try {
-      const index = memoryStore.users.findIndex((u) => u.id === req.params.id && u.role === 'STUDENT');
+      const index = memoryStore.users.findIndex((u) => u.id === req.params.id && ['STUDENT', 'CANDIDATE'].includes(String(u.role).toUpperCase()));
       if (index === -1) {
         return sendError(res, 'Student not found.', 404, 'NOT_FOUND');
       }
@@ -86,11 +94,19 @@ export class StudentController {
         req.body.email_normalized = normalized;
       }
 
+      let regVal = memoryStore.users[index].register_number ?? memoryStore.users[index].registerNumber ?? memoryStore.users[index].registerNo ?? '';
+      if (req.body.register_number !== undefined || req.body.registerNumber !== undefined || req.body.registerNo !== undefined) {
+        const raw = req.body.register_number ?? req.body.registerNumber ?? req.body.registerNo;
+        regVal = raw !== undefined && raw !== null ? String(raw).trim() : '';
+      }
+
       const updated = {
         ...memoryStore.users[index],
         ...req.body,
         id: req.params.id,
-        role: 'STUDENT',
+        register_number: regVal,
+        registerNumber: regVal,
+        registerNo: regVal,
         updated_at: new Date().toISOString(),
       };
 
@@ -111,7 +127,7 @@ export class StudentController {
 
   static async deleteStudent(req, res, next) {
     try {
-      const index = memoryStore.users.findIndex((u) => u.id === req.params.id && u.role === 'STUDENT');
+      const index = memoryStore.users.findIndex((u) => u.id === req.params.id && ['STUDENT', 'CANDIDATE'].includes(String(u.role).toUpperCase()));
       if (index === -1) {
         return sendError(res, 'Student not found.', 404, 'NOT_FOUND');
       }
@@ -123,6 +139,24 @@ export class StudentController {
           await supabase.from('users').delete().eq('id', req.params.id);
         } catch {}
       }
+
+      // Cascade remove student from classes
+      if (Array.isArray(memoryStore.classes)) {
+        for (const cls of memoryStore.classes) {
+          if (Array.isArray(cls.studentIds) && cls.studentIds.includes(req.params.id)) {
+            cls.studentIds = cls.studentIds.filter((id) => id !== req.params.id);
+            if (isSupabaseConfigured && supabase) {
+              try {
+                await supabase.from('classes').update(cls).eq('id', cls.id);
+              } catch {}
+            }
+          }
+        }
+      }
+
+      const { broadcastDatabaseUpdate } = await import('../websocket/testSocket.js');
+      broadcastDatabaseUpdate({ table: 'users', id: req.params.id, action: 'delete' });
+      broadcastDatabaseUpdate({ table: 'students', id: req.params.id, action: 'delete' });
 
       return sendSuccess(res, { id: req.params.id, deleted: true }, 'Student deleted.');
     } catch (err) {

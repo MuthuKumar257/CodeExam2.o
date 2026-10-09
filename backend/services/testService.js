@@ -147,16 +147,14 @@ export class TestService {
 
   static async deleteTest(id) {
     const index = memoryStore.tests.findIndex((t) => t.id === id);
-    if (index === -1) return false;
-
-    // Mark as deleted so rankings and history can cleanly ignore it
-    memoryStore.tests[index].is_deleted = true;
-    memoryStore.tests[index].status = 'DELETED';
-    memoryStore.tests[index].updated_at = new Date().toISOString();
+    if (index !== -1) {
+      memoryStore.tests.splice(index, 1);
+    }
 
     if (isSupabaseConfigured && supabase) {
       try {
-        await supabase.from('tests').update({ is_deleted: true, status: 'DELETED' }).eq('id', id);
+        await supabase.from('assessments').delete().eq('id', id);
+        await supabase.from('tests').delete().eq('id', id);
       } catch (err) {
         logger.warn('Supabase delete test fallback:', err.message);
       }

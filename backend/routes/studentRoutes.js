@@ -12,7 +12,7 @@ router.get('/:id', optionalAuthenticate, StudentController.getStudentById);
 router.post('/bulk-import', authenticate, requireRole('ADMIN', 'FACULTY'), StudentController.bulkImport);
 router.post('/', authenticate, requireRole('ADMIN', 'FACULTY'), StudentController.createStudent);
 router.put('/:id', authenticate, requireRole('ADMIN', 'FACULTY'), StudentController.updateStudent);
-router.delete('/:id', authenticate, requireRole('ADMIN'), StudentController.deleteStudent);
+router.delete('/:id', authenticate, requireRole('ADMIN', 'FACULTY'), StudentController.deleteStudent);
 
 // Student sessions and submissions subroutes
 router.get('/:studentId/sessions', optionalAuthenticate, SessionController.getStudentSessions);

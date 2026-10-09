@@ -26,14 +26,6 @@ export function isStudentAssignedToClass(cls: Classroom, stu: User): boolean {
   const stuClassName = String((stu as any).className || (stu as any).classroom || (stu as any).class || '').trim().toLowerCase();
   if (stuClassName && (stuClassName === clsIdLower || stuClassName === clsNameLower)) return true;
 
-  // 4. Department intelligent match:
-  if (clsNameLower && stu.department) {
-    const deptLower = stu.department.trim().toLowerCase();
-    if (deptLower && (clsNameLower.includes(deptLower) || (deptLower.includes('computer') && clsNameLower.includes('cse')))) {
-      return true;
-    }
-  }
-
   return false;
 }
 

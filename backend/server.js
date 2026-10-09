@@ -22,6 +22,7 @@ import settingsRoutes from './routes/settingsRoutes.js';
 import dbRoutes from './routes/dbRoutes.js';
 import recordingRoutes, { registerRecordingLookups } from './routes/recordingRoutes.js';
 import { classesRouter, departmentsRouter, institutionsRouter } from './routes/academicRoutes.js';
+import userRoutes from './routes/userRoutes.js';
 
 import { errorMiddleware } from './middleware/errorMiddleware.js';
 import { requestContext } from './middleware/requestContext.js';
@@ -99,6 +100,7 @@ app.get(['/api/server-time', '/server-time'], (_req, res) => {
 
 // REST API Endpoints
 app.use('/api/auth', authRoutes);
+app.use(['/api/users', '/api/user'], userRoutes);
 app.use('/api/students', studentRoutes);
 app.use('/api/faculty', facultyRoutes);
 app.use(['/api/admin', '/api/admins'], adminRoutes);

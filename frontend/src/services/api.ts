@@ -111,13 +111,34 @@ async function request<T>(path: string, options: RequestInit = {}, maxRetries: n
 }
 
 
-export async function deleteResource(resource: 'users' | 'classes' | 'questions' | 'assessments', id: string) {
-  if (!id || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(id)) {
-    throw new Error(`Invalid ${resource.slice(0, -1)} ID.`);
+export type DeletableResource =
+  | 'users'
+  | 'students'
+  | 'faculty'
+  | 'classes'
+  | 'departments'
+  | 'institutions'
+  | 'questions'
+  | 'assessments'
+  | 'tests'
+  | 'testcases';
+
+export async function deleteResource(resource: DeletableResource, id: string) {
+  if (!id || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(id)) {
+    throw new Error(`Invalid ${resource} ID.`);
   }
-  const endpoint = resource === 'users' || resource === 'assessments'
-    ? `/api/db/${resource}/${encodeURIComponent(id)}`
-    : `/api/${resource}/${encodeURIComponent(id)}`;
+  let endpoint: string;
+  if (resource === 'users') endpoint = `/api/users/${encodeURIComponent(id)}`;
+  else if (resource === 'students') endpoint = `/api/students/${encodeURIComponent(id)}`;
+  else if (resource === 'faculty') endpoint = `/api/faculty/${encodeURIComponent(id)}`;
+  else if (resource === 'classes') endpoint = `/api/classes/${encodeURIComponent(id)}`;
+  else if (resource === 'departments') endpoint = `/api/departments/${encodeURIComponent(id)}`;
+  else if (resource === 'institutions') endpoint = `/api/institutions/${encodeURIComponent(id)}`;
+  else if (resource === 'questions') endpoint = `/api/questions/${encodeURIComponent(id)}`;
+  else if (resource === 'assessments' || resource === 'tests') endpoint = `/api/tests/${encodeURIComponent(id)}`;
+  else if (resource === 'testcases') endpoint = `/api/testcases/${encodeURIComponent(id)}`;
+  else endpoint = `/api/db/${resource}/${encodeURIComponent(id)}`;
+
   return request<{ success: true; id: string }>(endpoint, { method: 'DELETE' });
 }
 

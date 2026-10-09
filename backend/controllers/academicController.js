@@ -133,6 +133,24 @@ export class AcademicController {
           await supabase.from('classes').delete().eq('id', classId);
         } catch {}
       }
+
+      // Cascade remove classId from users
+      if (Array.isArray(memoryStore.users)) {
+        for (const u of memoryStore.users) {
+          if (Array.isArray(u.classIds) && u.classIds.includes(classId)) {
+            u.classIds = u.classIds.filter((cid) => cid !== classId);
+            if (isSupabaseConfigured && supabase) {
+              try {
+                await supabase.from('users').update(u).eq('id', u.id);
+              } catch {}
+            }
+          }
+        }
+      }
+
+      const { broadcastDatabaseUpdate } = await import('../websocket/testSocket.js');
+      broadcastDatabaseUpdate({ table: 'classes', id: classId, action: 'delete' });
+
       return sendSuccess(res, { id: classId, deleted: true }, 'Class deleted successfully.');
     } catch (err) {
       next(err);
@@ -243,6 +261,10 @@ export class AcademicController {
           await supabase.from('departments').delete().eq('id', deptId);
         } catch {}
       }
+
+      const { broadcastDatabaseUpdate } = await import('../websocket/testSocket.js');
+      broadcastDatabaseUpdate({ table: 'departments', id: deptId, action: 'delete' });
+
       return sendSuccess(res, { id: deptId, deleted: true }, 'Department deleted successfully.');
     } catch (err) {
       next(err);
@@ -325,6 +347,10 @@ export class AcademicController {
           await supabase.from('institutions').delete().eq('id', instId);
         } catch {}
       }
+
+      const { broadcastDatabaseUpdate } = await import('../websocket/testSocket.js');
+      broadcastDatabaseUpdate({ table: 'institutions', id: instId, action: 'delete' });
+
       return sendSuccess(res, { id: instId, deleted: true }, 'Institution deleted successfully.');
     } catch (err) {
       next(err);

@@ -54,6 +54,11 @@ export class TestController {
       if (!success) {
         return sendError(res, 'Test not found.', 404, 'TEST_NOT_FOUND');
       }
+
+      const { broadcastDatabaseUpdate } = await import('../websocket/testSocket.js');
+      broadcastDatabaseUpdate({ table: 'assessments', id: req.params.id, action: 'delete' });
+      broadcastDatabaseUpdate({ table: 'tests', id: req.params.id, action: 'delete' });
+
       return sendSuccess(res, { id: req.params.id, deleted: true }, 'Test deleted successfully.');
     } catch (err) {
       next(err);
