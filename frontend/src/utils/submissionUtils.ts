@@ -42,6 +42,65 @@ export function shuffleArrayWithSeed<T>(array: T[], seedStr: string): T[] {
   return result;
 }
 
+export interface QuestionScoringInput {
+  passedTestCases?: number;
+  totalTestCases?: number;
+  maxMarks?: number;
+  passedCount?: number;
+  totalCount?: number;
+  questionMarks?: number;
+  maxScore?: number;
+  marks?: number;
+}
+
+/**
+ * Calculates score strictly according to passed test cases:
+ * Question Score = (Passed Test Cases / Total Test Cases) * Maximum Question Marks
+ * 
+ * Never awards full marks if any test case failed.
+ * Returns 0 if passed <= 0 or total <= 0.
+ * Rounds to 2 decimal places.
+ */
+export function calculateQuestionScore(
+  arg1?: QuestionScoringInput | number,
+  arg2?: number,
+  arg3?: number
+): number {
+  let passedTestCases = 0;
+  let totalTestCases = 0;
+  let maxMarks = 0;
+
+  if (typeof arg1 === 'object' && arg1 !== null) {
+    passedTestCases = Number(arg1.passedTestCases ?? arg1.passedCount ?? 0);
+    totalTestCases = Number(arg1.totalTestCases ?? arg1.totalCount ?? 0);
+    maxMarks = Number(arg1.maxMarks ?? arg1.questionMarks ?? arg1.maxScore ?? arg1.marks ?? 0);
+  } else {
+    passedTestCases = Number(arg1 ?? 0);
+    totalTestCases = Number(arg2 ?? 0);
+    maxMarks = Number(arg3 ?? 0);
+  }
+
+  if (
+    !Number.isFinite(passedTestCases) ||
+    !Number.isFinite(totalTestCases) ||
+    !Number.isFinite(maxMarks) ||
+    totalTestCases <= 0 ||
+    passedTestCases <= 0 ||
+    maxMarks <= 0
+  ) {
+    return 0;
+  }
+
+  const effectivePassed = Math.min(passedTestCases, totalTestCases);
+  if (effectivePassed === totalTestCases) {
+    return Math.round((maxMarks + Number.EPSILON) * 100) / 100;
+  }
+
+  const rawScore = (effectivePassed / totalTestCases) * maxMarks;
+  const rounded = Math.round((rawScore + Number.EPSILON) * 100) / 100;
+  return Math.min(rounded, maxMarks > 0.01 ? maxMarks - 0.01 : 0);
+}
+
 /**
  * Generates the specific list of question IDs for a candidate according to:
  * 1. assessment.randomizeQuestions (if true, shuffles questions uniquely per candidate and attempt)
@@ -442,35 +501,19 @@ export function getSessionTotalMarksObtained(
       if (sub) {
         if (sub.score !== undefined && sub.score !== null) {
           qScore = Math.min(Number(sub.score), qMax);
-        } else if (sub.testCaseResults && sub.testCaseResults.length > 0) {
-          const testResults = sub.testCaseResults || [];
-          const hiddenResults = testResults.filter((tc: any) => tc.isPublic === false);
-          if (hiddenResults.length > 0 && Number(q?.pointsPerHiddenTestCase) > 0) {
-            const passedHidden = hiddenResults.filter((tc: any) => tc.passed).length;
-            qScore = Math.min(qMax, passedHidden * Number(q?.pointsPerHiddenTestCase));
-          } else if (hiddenResults.length > 0) {
-            const passedHidden = hiddenResults.filter((tc: any) => tc.passed).length;
-            qScore = Math.round((passedHidden / hiddenResults.length) * qMax);
-          } else {
-            const passedCount = testResults.filter((tc: any) => tc.passed).length;
-            qScore = testResults.length > 0 ? Math.round((passedCount / testResults.length) * qMax) : 0;
-          }
-        } else if (sub.status === 'Accepted' || (sub.testCasesPassed && sub.totalTestCases && sub.testCasesPassed === sub.totalTestCases)) {
-          qScore = qMax;
-        } else if (sub.testCasesPassed && sub.totalTestCases && sub.totalTestCases > 0) {
-          qScore = Math.round((sub.testCasesPassed / sub.totalTestCases) * qMax);
         } else {
-          qScore = 0;
+          const testResults = sub.testCaseResults || [];
+          const passedCount = sub.testCasesPassed ?? (testResults.length > 0 ? testResults.filter((tc: any) => tc.passed).length : 0);
+          const totalCount = sub.totalTestCases || testResults.length || 0;
+          qScore = calculateQuestionScore({ passedTestCases: passedCount, totalTestCases: totalCount, maxMarks: qMax });
         }
       } else if (qs) {
         if (qs.score !== undefined && qs.score !== null) {
           qScore = Math.min(Number(qs.score), qMax);
-        } else if (qs.status === 'Accepted' || qs.isPassed) {
-          qScore = qMax;
-        } else if (qs.testCasesPassed && qs.totalTestCases && qs.totalTestCases > 0) {
-          qScore = Math.round((qs.testCasesPassed / qs.totalTestCases) * qMax);
         } else {
-          qScore = 0;
+          const passedCount = qs.testCasesPassed ?? (qs.status === 'Accepted' && qs.totalTestCases ? qs.totalTestCases : 0);
+          const totalCount = qs.totalTestCases ?? 0;
+          qScore = calculateQuestionScore({ passedTestCases: passedCount, totalTestCases: totalCount, maxMarks: qMax });
         }
       }
 

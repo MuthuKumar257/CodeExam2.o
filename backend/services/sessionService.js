@@ -260,7 +260,24 @@ export class SessionService {
       return this.autoSubmitSession(sessionId, nowDate);
     }
     if (session.attempt_status && session.attempt_status !== 'IN_PROGRESS') return session;
-    if (submission.score !== undefined) session.score = submission.score;
+    if (submission.score !== undefined) {
+      session.score = submission.score;
+    } else {
+      const studentTestSubs = memoryStore.submissions.filter(
+        (s) => s.student_id === session.student_id && s.test_id === session.test_id
+      );
+      if (studentTestSubs.length > 0) {
+        const questionScoreMap = new Map();
+        for (const sub of studentTestSubs) {
+          questionScoreMap.set(sub.question_id, Number(sub.score || 0));
+        }
+        let total = 0;
+        for (const sScore of questionScoreMap.values()) {
+          total += sScore;
+        }
+        session.score = Math.round((total + Number.EPSILON) * 100) / 100;
+      }
+    }
     if (submission.totalPoints !== undefined) session.total_marks = submission.totalPoints;
     if (submission.state !== undefined) session.latest_submission = submission.state;
     session.status = 'SUBMITTED';
@@ -270,7 +287,13 @@ export class SessionService {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        await supabase.from('sessions').update({ status: 'SUBMITTED', submitted_at: now, updated_at: now }).eq('id', sessionId);
+        await supabase.from('sessions').update({
+          score: session.score,
+          total_marks: session.total_marks,
+          status: 'SUBMITTED',
+          submitted_at: now,
+          updated_at: now
+        }).eq('id', sessionId);
       } catch (err) {
         logger.warn('Supabase submit session fallback:', err.message);
       }
@@ -291,7 +314,24 @@ export class SessionService {
       throw error;
     }
     const now = currentTime.toISOString();
-    if (submission.score !== undefined) session.score = submission.score;
+    if (submission.score !== undefined) {
+      session.score = submission.score;
+    } else {
+      const studentTestSubs = memoryStore.submissions.filter(
+        (s) => s.student_id === session.student_id && s.test_id === session.test_id
+      );
+      if (studentTestSubs.length > 0) {
+        const questionScoreMap = new Map();
+        for (const sub of studentTestSubs) {
+          questionScoreMap.set(sub.question_id, Number(sub.score || 0));
+        }
+        let total = 0;
+        for (const sScore of questionScoreMap.values()) {
+          total += sScore;
+        }
+        session.score = Math.round((total + Number.EPSILON) * 100) / 100;
+      }
+    }
     if (submission.totalPoints !== undefined) session.total_marks = submission.totalPoints;
     if (submission.state !== undefined) session.latest_submission = submission.state;
     session.status = 'EXPIRED';
@@ -299,6 +339,21 @@ export class SessionService {
     session.submitted_at = session.submitted_at || now;
     session.completed_at = session.completed_at || now;
     session.updated_at = now;
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase.from('sessions').update({
+          score: session.score,
+          total_marks: session.total_marks,
+          status: 'EXPIRED',
+          submitted_at: session.submitted_at,
+          completed_at: session.completed_at,
+          updated_at: now,
+        }).eq('id', sessionId);
+      } catch (err) {
+        logger.warn('Supabase auto submit session fallback:', err.message);
+      }
+    }
     return session;
   }
 

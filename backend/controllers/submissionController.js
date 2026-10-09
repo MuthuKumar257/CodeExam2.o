@@ -51,11 +51,16 @@ export class SubmissionController {
         }));
         const passed = results.filter((result) => result.passed).length;
         const hasCompilationError = batch.results.some((result) => result.status === 'compilation_error');
+        const passedCount = hasCompilationError ? 0 : passed;
+        const totalCount = results.length;
+        const statusLabel = hasCompilationError
+          ? 'Compilation Error'
+          : (passedCount === totalCount && totalCount > 0 ? 'Accepted' : 'Wrong Answer');
         return sendSuccess(res, {
-          status: hasCompilationError ? 'Compilation Error' : (passed === results.length ? 'Accepted' : 'Wrong Answer'),
+          status: statusLabel,
           language: batch.language,
-          testCasesPassed: passed,
-          totalTestCases: results.length,
+          testCasesPassed: passedCount,
+          totalTestCases: totalCount,
           testCaseResults: results,
           executionTimeMs: batch.metrics.executionTime,
           metrics: batch.metrics,
@@ -109,10 +114,16 @@ export class SubmissionController {
         submissionId: submission_id || submissionId || randomUUID(),
       });
 
+      const statusLabel = submission.resultStatus === 'COMPILATION_ERROR'
+        ? 'Compilation Error'
+        : (submission.passed_count === submission.total_testcases && submission.total_testcases > 0 ? 'Accepted' : 'Wrong Answer');
+
       const execResult = {
-        status: submission.resultStatus === 'COMPILATION_ERROR'
-          ? 'Compilation Error'
-          : (submission.passed_count === submission.total_testcases ? 'Accepted' : 'Wrong Answer'),
+        status: statusLabel,
+        score: submission.score,
+        marks: submission.score,
+        maxScore: submission.max_score,
+        maxMarks: submission.max_score,
         testCasesPassed: submission.passed_count,
         totalTestCases: submission.total_testcases,
         executionTimeMs: submission.executionTime,
@@ -129,10 +140,14 @@ export class SubmissionController {
       };
       return sendSuccess(res, {
         submissionId: submission.submission_id,
-        status: submission.status,
+        status: statusLabel,
+        resultStatus: submission.resultStatus,
         passedTestCases: submission.passed_count,
         totalTestCases: submission.total_testcases,
+        score: submission.score,
         marks: submission.score,
+        maxScore: submission.max_score,
+        maxMarks: submission.max_score,
         executionTime: submission.executionTime,
         results: submission.testcase_results,
         submission,

@@ -19,7 +19,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { Assessment, CandidateSession, Submission } from '../../types';
-import { getLatestCandidateSubmissions } from '../../utils/submissionUtils';
+import { getLatestCandidateSubmissions, calculateQuestionScore } from '../../utils/submissionUtils';
 
 interface AssessmentCompletedLockViewProps {
   assessment: Assessment;
@@ -98,12 +98,23 @@ export const AssessmentCompletedLockView: React.FC<AssessmentCompletedLockViewPr
     })(q);
 
     const qsFallback = session.questionStatuses?.[q.id];
-    const isAccepted = latestSub?.status === 'Accepted' || qsFallback?.status === 'Accepted';
+    const qMax = safeAssessment.isEqualMarks && safeAssessment.marksPerQuestion
+      ? Number(safeAssessment.marksPerQuestion)
+      : (q.points || 10);
+
+    const testCasesPassed = latestSub
+      ? (latestSub.testCasesPassed ?? (latestSub.testCaseResults ? latestSub.testCaseResults.filter((tc: any) => tc.passed).length : 0))
+      : (qsFallback?.testCasesPassed ?? 0);
+    const totalTestCases = latestSub
+      ? (latestSub.totalTestCases || (latestSub.testCaseResults ? latestSub.testCaseResults.length : 0) || resolvedTC.length || 1)
+      : (qsFallback?.totalTestCases || resolvedTC.length || 1);
+
+    const isAccepted = testCasesPassed === totalTestCases && totalTestCases > 0;
     const scoreEarned = latestSub && latestSub.score !== undefined && latestSub.score !== null
-      ? latestSub.score
-      : (qsFallback && qsFallback.score !== undefined ? qsFallback.score : 0);
-    const testCasesPassed = latestSub ? latestSub.testCasesPassed : (qsFallback ? qsFallback.testCasesPassed : (isAccepted ? resolvedTC.length : 0));
-    const totalTestCases = latestSub ? (latestSub.totalTestCases || resolvedTC.length || 1) : (qsFallback?.totalTestCases || resolvedTC.length || 1);
+      ? Number(latestSub.score)
+      : (qsFallback && qsFallback.score !== undefined && qsFallback.score !== null
+        ? Number(qsFallback.score)
+        : calculateQuestionScore({ passedTestCases: testCasesPassed, totalTestCases, maxMarks: qMax }));
 
     return {
       question: q,
@@ -113,6 +124,7 @@ export const AssessmentCompletedLockView: React.FC<AssessmentCompletedLockViewPr
       scoreEarned,
       testCasesPassed,
       totalTestCases,
+      qMax,
     };
   });
 
@@ -503,7 +515,7 @@ export const AssessmentCompletedLockView: React.FC<AssessmentCompletedLockViewPr
         </h3>
 
         <div className="space-y-4">
-          {questionResults.map(({ question, resolvedTestCases, latestSub, isAccepted, scoreEarned, testCasesPassed, totalTestCases }, idx) => {
+          {questionResults.map(({ question, resolvedTestCases, latestSub, isAccepted, scoreEarned, testCasesPassed, totalTestCases, qMax }, idx) => {
             const isExpanded = expandedQuestionId === (question?.id || null);
             const qLang = latestSub?.language ||
               session.languageMap?.[question.id] ||
@@ -536,7 +548,7 @@ export const AssessmentCompletedLockView: React.FC<AssessmentCompletedLockViewPr
                         )}
                       </div>
                       <p className="text-[11px] text-slate-400">
-                        {question?.difficulty || 'EASY'} • Max {question?.points || 0} Points
+                        {question?.difficulty || 'EASY'} • Max {qMax} Points
                       </p>
                     </div>
                   </div>
@@ -550,7 +562,7 @@ export const AssessmentCompletedLockView: React.FC<AssessmentCompletedLockViewPr
                           </span>
                         ) : latestSub ? (
                           <span className="px-2.5 py-0.5 rounded text-[11px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center gap-1">
-                            <XCircle className="w-3.5 h-3.5 text-rose-400" /> {latestSub.status}
+                            <XCircle className="w-3.5 h-3.5 text-rose-400" /> {latestSub.status === 'Accepted' ? 'Wrong Answer' : (latestSub.status || 'Wrong Answer')}
                           </span>
                         ) : (
                           <span className="px-2.5 py-0.5 rounded text-[11px] font-semibold bg-slate-800 text-slate-500">
@@ -559,7 +571,7 @@ export const AssessmentCompletedLockView: React.FC<AssessmentCompletedLockViewPr
                         )}
                       </div>
                       <span className="text-[11px] font-mono text-slate-400">
-                        Score: <strong className="text-slate-200">{scoreEarned} / {question.points}</strong> pts ({testCasesPassed}/{totalTestCases} test cases)
+                        Score: <strong className="text-slate-200">{scoreEarned} / {qMax}</strong> pts ({testCasesPassed}/{totalTestCases} test cases)
                       </span>
                     </div>
 

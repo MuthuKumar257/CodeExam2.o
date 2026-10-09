@@ -46,7 +46,7 @@ import { FrameTelemetry, LocalProctorDetector } from '../../services/proctorDete
 import { ProctorCamera } from './ProctorCamera';
 import { storeSessionVideo } from '../../services/videoStorage';
 import { saveAttemptToFirestore } from '../../services/firebase';
-import { getCandidateAssignedQuestions } from '../../utils/submissionUtils';
+import { getCandidateAssignedQuestions, calculateQuestionScore } from '../../utils/submissionUtils';
 import { setAssessmentActiveState } from '../../services/supabaseDatabase';
 import {
   uploadRecordingApi,
@@ -2571,43 +2571,25 @@ fn main() {
       }, 100);
 
       // Check if test cases passed or status is Accepted
-      const passedCount = res.testCasesPassed || 0;
-      const totalCount = res.totalTestCases || 1;
-      const isAccepted =
-        res.status === 'Accepted' ||
-        (passedCount === totalCount && totalCount > 0);
+      const testResults = res.testCaseResults || [];
+      const passedCount = res.testCasesPassed ?? (testResults.length > 0 ? testResults.filter((tc: any) => tc.passed).length : 0);
+      const totalCount = res.totalTestCases || (testResults.length > 0 ? testResults.length : 1);
+      const isAccepted = passedCount === totalCount && totalCount > 0;
 
-      const statusLabel: QuestionStatusItem['status'] = isAccepted ? 'Accepted' : res.status || 'Submitted';
+      const statusLabel: QuestionStatusItem['status'] = isAccepted
+        ? 'Accepted'
+        : (res.status === 'Compilation Error' ? 'Compilation Error' : (res.status === 'Runtime Error' ? 'Runtime Error' : 'Wrong Answer'));
 
-      // Mark calculation: marks are considered IF AND ONLY IF hidden test cases are passed!
       const qMax = assessment.isEqualMarks
         ? (Number(assessment.marksPerQuestion) || Number(currentQuestion.points) || 10)
         : (Number(currentQuestion.points) || 10);
 
-      const testResults = res.testCaseResults || [];
-      const hiddenResults = testResults.filter((tc: any) => tc.isPublic === false);
-      const totalHiddenCount = hiddenResults.length;
-      const passedHiddenCount = hiddenResults.filter((tc: any) => tc.passed).length;
-
-      let computedScore = 0;
-      if (totalHiddenCount > 0) {
-        // Marks are awarded ONLY for hidden test cases that passed; NO marks for failed test cases; NO marks for public test cases
-        if (passedHiddenCount > 0) {
-          const ptsPerHidden = Number(currentQuestion.pointsPerHiddenTestCase);
-          if (ptsPerHidden > 0) {
-            computedScore = Math.min(qMax, passedHiddenCount * ptsPerHidden);
-          } else {
-            computedScore = Math.round((passedHiddenCount / totalHiddenCount) * qMax);
-          }
-        } else {
-          computedScore = 0;
-        }
-      } else {
-        // Fallback only if question has no hidden test cases configured (all are public)
-        const totalCount = res.totalTestCases || testResults.length || 1;
-        const passedCount = res.testCasesPassed ?? testResults.filter((tc: any) => tc.passed).length;
-        computedScore = (passedCount > 0 && totalCount > 0) ? Math.round((passedCount / totalCount) * qMax) : 0;
-      }
+      // Score: Authoritative from backend response if present, otherwise calculateQuestionScore
+      const computedScore = (res.score !== undefined && res.score !== null)
+        ? Number(res.score)
+        : (res.marks !== undefined && res.marks !== null)
+        ? Number(res.marks)
+        : calculateQuestionScore({ passedTestCases: passedCount, totalTestCases: totalCount, maxMarks: qMax });
 
       // Sync code & language ONLY when code was submitted (not on every letter typed)
       submittedCodeMapRef.current[currentQuestion.id] = currentCode;
@@ -3338,7 +3320,7 @@ fn main() {
               const totalCount = resolvedAllTestCases.length || (runResult.totalTestCases || 1);
               const passedCount = resolvedAllTestCases.filter(tc => tc.passed).length;
               const failedCount = totalCount - passedCount;
-              const isAccepted = runResult.status === 'Accepted' || (passedCount === totalCount && totalCount > 0);
+              const isAccepted = passedCount === totalCount && totalCount > 0;
 
               const filteredCases = resolvedAllTestCases.filter(tc => {
                 if (tcFilter === 'PASSED') return tc.passed;
@@ -3346,16 +3328,15 @@ fn main() {
                 return true;
               });
 
-              const currentMarks = questionStatuses[currentQuestion.id]?.score ?? (
-                isAccepted
-                  ? (assessment.isEqualMarks ? (Number(assessment.marksPerQuestion) || Number(currentQuestion.points) || 10) : (Number(currentQuestion.points) || 10))
-                  : totalCount > 0
-                  ? Math.round((passedCount / totalCount) * (assessment.isEqualMarks ? (Number(assessment.marksPerQuestion) || Number(currentQuestion.points) || 10) : (Number(currentQuestion.points) || 10)))
-                  : 0
-              );
               const maxMarks = assessment.isEqualMarks
                 ? (Number(assessment.marksPerQuestion) || Number(currentQuestion.points) || 10)
                 : (Number(currentQuestion.points) || 10);
+
+              const currentMarks = questionStatuses[currentQuestion.id]?.score ?? (
+                isAccepted
+                  ? maxMarks
+                  : calculateQuestionScore({ passedTestCases: passedCount, totalTestCases: totalCount, maxMarks })
+              );
 
               return (
                 <div ref={resultsRef} className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-4 font-mono text-xs animate-fadeIn shadow-xl">
@@ -3376,7 +3357,7 @@ fn main() {
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="font-sans font-black text-sm uppercase tracking-wide">
-                            {isAccepted ? 'ACCEPTED (ALL TEST CASES PASSED)' : `FAILED / ${runResult.status?.toUpperCase() || 'REJECTED'}`}
+                            {isAccepted ? 'ACCEPTED (ALL TEST CASES PASSED)' : (runResult.status ? runResult.status.toUpperCase() : 'WRONG ANSWER')}
                           </span>
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-sans ${
                             isAccepted
@@ -3398,7 +3379,7 @@ fn main() {
                       <div className="text-right">
                         <span className="text-[10px] text-slate-400 uppercase font-bold block">Marks Earned</span>
                         <span className={`font-mono text-sm font-bold ${isAccepted ? 'text-emerald-400' : 'text-amber-400'}`}>
-                          {currentMarks} / {maxMarks} Pts
+                          Score: {currentMarks}/{maxMarks} pts ({passedCount}/{totalCount} test cases)
                         </span>
                       </div>
                       <div className="w-px h-8 bg-slate-800" />

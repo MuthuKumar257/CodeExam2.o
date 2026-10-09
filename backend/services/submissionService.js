@@ -2,7 +2,7 @@ import { memoryStore, supabase, isSupabaseConfigured } from './supabaseService.j
 import { QuestionService } from './questionService.js';
 import { executeCodeInSandbox } from './codeRunnerService.js';
 import { executeCodeBatchInSandbox, getLanguageConfig } from './codeRunnerService.js';
-import { calculateTestcaseScore, evaluateOutput } from './scoringService.js';
+import { calculateQuestionScore, calculateTestcaseScore, evaluateOutput } from './scoringService.js';
 import { logger } from '../utils/logger.js';
 import { randomUUID } from 'crypto';
 
@@ -59,17 +59,27 @@ export class SubmissionService {
 
     const testcases = await QuestionService.getAllTestcasesForEvaluation(questionId);
     const totalCount = testcases.length > 0 ? testcases.length : 1;
-    const questionMarks = Number(question.marks || 20);
+
+    let questionMarks = Number(question.marks || question.points || 20);
+    const test = testId ? memoryStore.tests.find((t) => t.id === testId) : null;
+    if (test) {
+      const isEqual = test.is_equal_marks ?? test.isEqualMarks;
+      const marksPerQ = test.marks_per_question ?? test.marksPerQuestion;
+      if (isEqual && marksPerQ) {
+        questionMarks = Number(marksPerQ);
+      }
+    }
 
     const testcaseResults = [];
     let passedCount = 0;
     const executionStarted = Date.now();
     const batch = await executeCodeBatchInSandbox(language, code, testcases);
     const hasCompilationError = batch.results.some((result) => result.status === 'compilation_error');
+
     for (let i = 0; i < testcases.length; i++) {
       const tc = testcases[i];
       const runResult = batch.results[i];
-      const isPassed = runResult.success && evaluateOutput(runResult.stdout, tc.expected_output);
+      const isPassed = !hasCompilationError && runResult.success && evaluateOutput(runResult.stdout, tc.expected_output);
 
       if (isPassed) {
         passedCount++;
@@ -88,7 +98,17 @@ export class SubmissionService {
       });
     }
 
-    const score = calculateTestcaseScore(passedCount, totalCount, questionMarks);
+    if (hasCompilationError) {
+      passedCount = 0;
+    }
+
+    const score = hasCompilationError
+      ? 0
+      : calculateQuestionScore({
+          passedTestCases: passedCount,
+          totalTestCases: totalCount,
+          maxMarks: questionMarks,
+        });
 
     const newSubmission = {
       id: submissionId,
@@ -108,7 +128,7 @@ export class SubmissionService {
       max_score: questionMarks,
       status: hasCompilationError
         ? 'COMPILATION_ERROR'
-        : (passedCount === totalCount ? 'ACCEPTED' : (passedCount > 0 ? 'PARTIAL' : 'WRONG_ANSWER')),
+        : (passedCount === totalCount && totalCount > 0 ? 'ACCEPTED' : (passedCount > 0 ? 'PARTIAL' : 'WRONG_ANSWER')),
       submitted_at: new Date().toISOString(),
       execution_metrics: {
         requestTime: executionStarted - requestStarted,
@@ -150,9 +170,17 @@ export class SubmissionService {
           totalSessionScore += sScore;
         }
 
-        session.score = Math.round(totalSessionScore * 100) / 100;
+        session.score = Math.round((totalSessionScore + Number.EPSILON) * 100) / 100;
         session.updated_at = new Date().toISOString();
         logger.info(`Updated session ${sessionId} total score to: ${session.score}`);
+
+        if (supabaseSubmissionsAvailable) {
+          try {
+            await supabase.from('sessions').update({ score: session.score, updated_at: session.updated_at }).eq('id', sessionId);
+          } catch (sessionErr) {
+            logger.warn('Failed to update session score in Supabase:', sessionErr.message);
+          }
+        }
       }
     }
 

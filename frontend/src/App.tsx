@@ -40,6 +40,7 @@ import {
   getQuestionMaxMarks,
   generateCandidateQuestionOrder,
   getCandidateAssignedQuestions,
+  calculateQuestionScore,
 } from './utils/submissionUtils';
 
 import {
@@ -1859,24 +1860,19 @@ export default function App() {
           }
         }
 
-        // Calculate score strictly based on hidden test cases
+        // Calculate score strictly based on passed test cases
         const latestScorePerQ: Record<string, number> = {};
         existingSubsForSession.forEach((sub) => {
           if (latestScorePerQ[sub.questionId] === undefined) {
             const q = resolvedQuestions.find((item) => item.id === sub.questionId);
             const qMax = targetAsm.isEqualMarks && targetAsm.marksPerQuestion ? Number(targetAsm.marksPerQuestion) : (q?.points || sub.maxScore || 10);
-            if (sub.testCaseResults && sub.testCaseResults.length > 0) {
-              const hResults = sub.testCaseResults.filter((tc: any) => tc.isPublic === false);
-              if (hResults.length > 0) {
-                const pHidden = hResults.filter((tc: any) => tc.passed).length;
-                const customPts = Number(q?.pointsPerHiddenTestCase);
-                const recomputed = pHidden > 0
-                  ? (customPts > 0 ? Math.min(qMax, pHidden * customPts) : Math.round((pHidden / hResults.length) * qMax))
-                  : 0;
-                sub.score = recomputed;
-                sub.maxScore = qMax;
-              }
+            if (sub.score === undefined || sub.score === null) {
+              const testResults = sub.testCaseResults || [];
+              const pCount = sub.testCasesPassed ?? (testResults.length > 0 ? testResults.filter((tc: any) => tc.passed).length : 0);
+              const tCount = sub.totalTestCases || testResults.length || 0;
+              sub.score = calculateQuestionScore({ passedTestCases: pCount, totalTestCases: tCount, maxMarks: qMax });
             }
+            sub.maxScore = qMax;
             latestScorePerQ[sub.questionId] = Number(sub.score || 0);
           }
         });
@@ -2146,28 +2142,16 @@ export default function App() {
     }
 
     const testResults = execRes.testCaseResults || [];
-    const hiddenResults = testResults.filter((tc: any) => tc.isPublic === false);
-    const totalHiddenCount = hiddenResults.length;
-    const passedHiddenCount = hiddenResults.filter((tc: any) => tc.passed).length;
-
-    let earnedScore = 0;
-    if (totalHiddenCount > 0) {
-      // Marks are awarded ONLY for hidden test cases that passed; NO marks for failed test cases; NO marks for public test cases
-      if (passedHiddenCount > 0) {
-        const customPts = Number(q?.pointsPerHiddenTestCase);
-        if (customPts > 0) {
-          earnedScore = Math.min(fallbackMaxScore, passedHiddenCount * customPts);
-        } else {
-          earnedScore = Math.round((passedHiddenCount / totalHiddenCount) * fallbackMaxScore);
-        }
-      } else {
-        earnedScore = 0;
-      }
-    } else {
-      const totalAll = execRes.totalTestCases || testResults.length || 1;
-      const passedAll = execRes.testCasesPassed ?? testResults.filter((tc: any) => tc.passed).length;
-      earnedScore = (passedAll > 0 && totalAll > 0) ? Math.round((passedAll / totalAll) * fallbackMaxScore) : 0;
-    }
+    const totalAll = execRes.totalTestCases || testResults.length || 1;
+    const passedAll = execRes.testCasesPassed ?? testResults.filter((tc: any) => tc.passed).length;
+    const earnedScore = calculateQuestionScore({
+      passedTestCases: passedAll,
+      totalTestCases: totalAll,
+      maxMarks: fallbackMaxScore,
+    });
+    const finalStatus = passedAll === totalAll && totalAll > 0
+      ? 'Accepted'
+      : (execRes.status === 'Compilation Error' ? 'Compilation Error' : 'Wrong Answer');
 
     const fallbackSub: Submission = {
       id: `sub-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -2181,14 +2165,14 @@ export default function App() {
       questionTitle: q?.title || 'Question',
       language,
       sourceCode,
-      status: execRes.status,
+      status: finalStatus,
       score: earnedScore,
       maxScore: fallbackMaxScore,
       executionTimeMs: execRes.executionTimeMs || 12,
       memoryUsageMb: execRes.memoryUsageMb || 14,
       submittedAt: new Date().toISOString(),
-      testCasesPassed: execRes.testCasesPassed ?? passedHiddenCount,
-      totalTestCases: execRes.totalTestCases ?? (allCases.length || 1),
+      testCasesPassed: passedAll,
+      totalTestCases: totalAll,
       testCaseResults: execRes.testCaseResults,
       stderr: execRes.stderr,
       stdout: execRes.stdout,
@@ -2227,7 +2211,16 @@ export default function App() {
       saveAttemptToFirestore(updatedSess).catch(() => {});
     }
 
-    return execRes;
+    return {
+      ...execRes,
+      score: earnedScore,
+      marks: earnedScore,
+      maxScore: fallbackMaxScore,
+      maxMarks: fallbackMaxScore,
+      status: finalStatus,
+      testCasesPassed: passedAll,
+      totalTestCases: totalAll,
+    };
   };
 
   // Review status update -> Firestore
@@ -2692,28 +2685,16 @@ export default function App() {
               const execRes = await executeCodeInSandbox(lang, codeVal, allCases);
               const qMax = asmObj?.isEqualMarks && asmObj?.marksPerQuestion ? Number(asmObj.marksPerQuestion) : (q.points || 10);
               const testResults = execRes.testCaseResults || [];
-              const hiddenResults = testResults.filter((tc: any) => tc.isPublic === false);
-              const totalHiddenCount = hiddenResults.length;
-              const passedHiddenCount = hiddenResults.filter((tc: any) => tc.passed).length;
-
-              // Marks are awarded ONLY for hidden test cases that passed; NO marks for failed test cases; NO marks for public test cases
-              let earnedScore = 0;
-              if (totalHiddenCount > 0) {
-                if (passedHiddenCount > 0) {
-                  const ptsPerHidden = Number(q.pointsPerHiddenTestCase);
-                  if (ptsPerHidden > 0) {
-                    earnedScore = Math.min(qMax, passedHiddenCount * ptsPerHidden);
-                  } else {
-                    earnedScore = Math.round((passedHiddenCount / totalHiddenCount) * qMax);
-                  }
-                } else {
-                  earnedScore = 0;
-                }
-              } else {
-                const totalCount = execRes.totalTestCases || testResults.length || 1;
-                const passedCount = execRes.testCasesPassed ?? testResults.filter((tc: any) => tc.passed).length;
-                earnedScore = (passedCount > 0 && totalCount > 0) ? Math.round((passedCount / totalCount) * qMax) : 0;
-              }
+              const totalCount = execRes.totalTestCases || testResults.length || 1;
+              const passedCount = execRes.testCasesPassed ?? testResults.filter((tc: any) => tc.passed).length;
+              const earnedScore = calculateQuestionScore({
+                passedTestCases: passedCount,
+                totalTestCases: totalCount,
+                maxMarks: qMax,
+              });
+              const finalStatus = passedCount === totalCount && totalCount > 0
+                ? 'Accepted'
+                : (execRes.status === 'Compilation Error' ? 'Compilation Error' : 'Wrong Answer');
 
               const autoSub: Submission = {
                 id: `sub-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -2727,14 +2708,14 @@ export default function App() {
                 questionTitle: q.title || 'Question',
                 language: lang,
                 sourceCode: codeVal,
-                status: execRes.status,
+                status: finalStatus,
                 score: earnedScore,
                 maxScore: qMax,
                 executionTimeMs: execRes.executionTimeMs || 15,
                 memoryUsageMb: execRes.memoryUsageMb || 16,
                 submittedAt: new Date().toISOString(),
-                testCasesPassed: execRes.testCasesPassed ?? passedHiddenCount,
-                totalTestCases: execRes.totalTestCases ?? (allCases.length || 1),
+                testCasesPassed: passedCount,
+                totalTestCases: totalCount,
                 testCaseResults: execRes.testCaseResults,
                 stderr: execRes.stderr,
                 stdout: execRes.stdout,
