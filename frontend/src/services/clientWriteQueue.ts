@@ -91,10 +91,14 @@ export class ClientWriteQueue {
       if (!raw) return;
       const parsed: QueuedWriteTask[] = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        // Stale DELETE actions or non-assessment writes that exceeded retry limits should not be re-attempted
+        // Stale DELETE actions or non-assessment writes that exceeded retry limits or are older than 12h should not be re-attempted
         const validTasks = parsed.filter((item) => {
           if (item.action === 'DELETE') return false;
           if (item.retries > 5 && !['submissions', 'attempts', 'sessions', 'answers', 'proctoring_events'].includes(item.table)) {
+            return false;
+          }
+          const isStale = (Date.now() - (item.enqueuedAt || 0)) > 12 * 60 * 60 * 1000;
+          if (isStale && !['submissions', 'attempts'].includes(item.table)) {
             return false;
           }
           return true;
@@ -105,10 +109,22 @@ export class ClientWriteQueue {
         });
         this.sortQueue();
         this.persistQueue();
-        console.log(`[ClientWriteQueue] Restored ${validTasks.length} pending writes from local storage.`);
+        if (validTasks.length > 0) {
+          console.log(`[ClientWriteQueue] Restored ${validTasks.length} pending writes from local storage.`);
+        }
       }
     } catch (err) {
       console.warn('[ClientWriteQueue] Failed to restore pending writes:', err);
+    }
+
+    if (typeof window !== 'undefined') {
+      (window as any).clearCodeExamQueue = () => {
+        this.clear();
+        try {
+          localStorage.removeItem(PENDING_STORAGE_KEY);
+        } catch {}
+        console.log('[ClientWriteQueue] Queue cleared successfully.');
+      };
     }
   }
 
