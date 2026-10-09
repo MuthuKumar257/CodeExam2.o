@@ -578,27 +578,40 @@ class SupabaseSyncLogger {
           logEntry.execution.httpStatusText = response.statusText;
 
           const contentType = response.headers.get('content-type') || '';
-          if (response.ok && contentType.includes('application/json')) {
-            const resJson = await response.json().catch(() => null);
-            logEntry.resolvedTable = resJson?.resolvedTable || table;
-            logEntry.execution.supabaseStatus = resJson?.supabaseStatus;
-            logEntry.execution.supabaseError = resJson?.supabaseError;
+          const responseStatus = response.status;
 
-            // Check if Supabase returned a PostgREST error
-            if (resJson?.supabaseError) {
-              logEntry.execution.failureStage = 'SUPABASE_POSTGREST';
-              logEntry.execution.errorMessage = `Supabase PostgREST Error [${resJson.supabaseError.code || 'UNKNOWN'}]: ${resJson.supabaseError.message}`;
-              finalError = logEntry.execution.errorMessage;
+          // 200, 204 or (for DELETE) 404 indicates the record is deleted / operation succeeded idempotently
+          if (response.ok || (isDelete && responseStatus === 404)) {
+            if (contentType.includes('application/json')) {
+              const resJson = await response.json().catch(() => null);
+              logEntry.resolvedTable = resJson?.resolvedTable || table;
+              logEntry.execution.supabaseStatus = resJson?.supabaseStatus;
+              logEntry.execution.supabaseError = resJson?.supabaseError;
+
+              // Check if Supabase returned a PostgREST error
+              if (resJson?.supabaseError && !isDelete) {
+                logEntry.execution.failureStage = 'SUPABASE_POSTGREST';
+                logEntry.execution.errorMessage = `Supabase PostgREST Error [${resJson.supabaseError.code || 'UNKNOWN'}]: ${resJson.supabaseError.message}`;
+                finalError = logEntry.execution.errorMessage;
+              } else {
+                backendSuccess = true;
+              }
             } else {
               backendSuccess = true;
             }
+          } else {
+            const resJson = contentType.includes('application/json') ? await response.json().catch(() => null) : null;
+            const errMsg = resJson?.message || resJson?.error || response.statusText;
+            logEntry.execution.errorMessage = `Backend responded with HTTP ${response.status}: ${errMsg}`;
+            finalError = logEntry.execution.errorMessage;
           }
         } catch {
-          // Backend server /api/db/save is not running (e.g. static hosting on Vercel)
+          // Backend fetch failed (e.g. offline, network disconnected)
         }
 
-        // Direct Supabase PostgREST fallback (for static/serverless Vercel deployments)
-        if (!backendSuccess && supabase) {
+        // Direct Supabase PostgREST fallback (ONLY when backend was unreachable due to network disconnect, not on HTTP responses)
+        const isTransportOffline = !logEntry.execution.httpStatus || logEntry.execution.httpStatus >= 502;
+        if (!backendSuccess && isTransportOffline && supabase) {
           let resolvedTable = table;
           if (table === 'sessions' || table === 'candidate_sessions') {
             resolvedTable = 'attempts';
@@ -612,7 +625,7 @@ class SupabaseSyncLogger {
 
           if (action === 'DELETE') {
             const { error: sbDelErr } = await supabase.from(resolvedTable).delete().eq('id', recordId);
-            if (!sbDelErr) {
+            if (!sbDelErr || sbDelErr.code === 'PGRST116' || sbDelErr.code === 'PGRST205') {
               finalSuccess = true;
               logEntry.execution.status = 'SUCCESS';
               logEntry.resolvedTable = `${resolvedTable} (direct)`;

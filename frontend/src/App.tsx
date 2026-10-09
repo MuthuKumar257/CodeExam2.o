@@ -123,7 +123,7 @@ import {
   validateCoreRlsPolicies,
   supabaseSyncLogger,
 } from './services/firebase';
-import { deleteResource, resetUserPasswordApi } from './services/api';
+import { resetUserPasswordApi } from './services/api';
 import { RestartTestOptions } from './components/common/RestartTestModal';
 
 export default function App() {
@@ -1034,11 +1034,6 @@ export default function App() {
   const handleDeleteUser = async (userId: string) => {
     if (!userId) throw new Error('Invalid user ID provided.');
     try {
-      try {
-        await deleteResource('users', userId);
-      } catch (apiErr) {
-        console.warn('API delete user warning:', apiErr);
-      }
       await deleteUserFromFirestore(userId);
 
       // State update
@@ -1271,12 +1266,7 @@ export default function App() {
   const handleDeleteClass = async (classId: string) => {
     if (!classId) throw new Error('Invalid class ID provided.');
     try {
-      try {
-        await deleteResource('classes', classId);
-      } catch (apiErr) {
-        console.warn('API delete class failed, falling back to direct Firestore deletion:', apiErr);
-        await deleteClassFromFirestore(classId);
-      }
+      await deleteClassFromFirestore(classId);
       setClasses((prev) => prev.filter((c) => c.id !== classId));
 
       // Remove deleted classId from all users' classIds
@@ -1842,12 +1832,7 @@ export default function App() {
   const handleDeleteQuestion = async (qId: string) => {
     if (!qId) throw new Error('Invalid question ID provided.');
     try {
-      try {
-        await deleteResource('questions', qId);
-      } catch (apiErr) {
-        console.warn('API delete question failed, falling back to direct Firestore deletion:', apiErr);
-        await deleteQuestionFromFirestore(qId);
-      }
+      await deleteQuestionFromFirestore(qId);
       setQuestions((prev) => prev.filter((q) => q.id !== qId));
     } catch (e) {
       console.error('Failed to delete question:', e);
@@ -1858,12 +1843,7 @@ export default function App() {
   const handleDeleteAssessment = async (asmId: string) => {
     if (!asmId) throw new Error('Invalid assessment ID provided.');
     try {
-      try {
-        await deleteResource('assessments', asmId);
-      } catch (apiErr) {
-        console.warn('API delete assessment failed, falling back to direct Firestore deletion:', apiErr);
-        await deleteAssessmentFromFirestore(asmId);
-      }
+      await deleteAssessmentFromFirestore(asmId);
       setAssessments((prev) => prev.filter((a) => a.id !== asmId));
     } catch (e) {
       console.error('Failed to delete assessment:', e);

@@ -160,43 +160,89 @@ export class UserController {
    * Delete a user across memory, database, and class associations
    */
   static async deleteUser(req, res, next) {
+    const requestId = req.requestId || `REQ-${Date.now().toString(36)}`;
     try {
       const userId = req.params.id;
-      if (!userId) {
-        return sendError(res, 'User ID is required.', 400, 'MISSING_USER_ID', req.requestId);
+      if (!userId || typeof userId !== 'string' || !userId.trim()) {
+        return sendError(res, 'A valid User ID is required.', 400, 'MISSING_USER_ID', requestId);
       }
 
-      const index = memoryStore.users.findIndex((u) => u.id === userId);
-      if (index === -1) {
-        return sendError(res, 'User not found.', 404, 'NOT_FOUND', req.requestId);
+      // 1. Idempotency Check: Was this user already deleted?
+      if (!memoryStore.deletedUserIds) {
+        memoryStore.deletedUserIds = new Set();
+      }
+      if (memoryStore.deletedUserIds.has(userId)) {
+        logger.info(`[UserController] [${requestId}] User ${userId} already deleted. Returning idempotent success.`);
+        return sendSuccess(res, { id: userId, deleted: true, alreadyDeleted: true }, 'User has already been deleted.');
       }
 
-      const targetUser = memoryStore.users[index];
+      // 2. Locate user in memoryStore or Supabase
+      let index = memoryStore.users.findIndex((u) => u.id === userId);
+      let targetUser = index !== -1 ? memoryStore.users[index] : null;
 
-      // Never delete master admin
-      if (String(targetUser.role).toUpperCase() === 'ADMIN' && targetUser.id === 'usr-admin') {
-        return sendError(res, 'The master administrator account cannot be deleted.', 403, 'ADMIN_DELETE_FORBIDDEN', req.requestId);
-      }
-
-      // Authorization check: FACULTY can only delete STUDENTS / CANDIDATES
-      const requesterRole = String(req.user?.role || '').toUpperCase();
-      if (requesterRole === 'FACULTY' && !['STUDENT', 'CANDIDATE'].includes(String(targetUser.role).toUpperCase())) {
-        return sendError(res, 'Faculty members can only delete student accounts.', 403, 'FORBIDDEN', req.requestId);
-      }
-
-      // Remove from memoryStore
-      memoryStore.users.splice(index, 1);
-
-      // Remove from Supabase
-      if (isSupabaseConfigured && supabase) {
+      if (!targetUser && isSupabaseConfigured && supabase) {
         try {
-          await supabase.from('users').delete().eq('id', userId);
-        } catch (err) {
-          logger.warn('[UserController] Supabase delete user error:', err.message);
+          const { data, error } = await supabase.from('users').select('*').eq('id', userId).maybeSingle();
+          if (!error && data) {
+            targetUser = data.data || data;
+          }
+        } catch (sbLookupErr) {
+          logger.warn(`[UserController] [${requestId}] Supabase lookup before delete notice: ${sbLookupErr?.message}`);
         }
       }
 
-      // Cascade: clean up user from all classes
+      if (!targetUser) {
+        logger.warn(`[UserController] [${requestId}] User ${userId} not found for deletion.`);
+        return sendError(res, 'User not found.', 404, 'NOT_FOUND', requestId);
+      }
+
+      // 3. Never delete master admin
+      if (String(targetUser.role).toUpperCase() === 'ADMIN' && targetUser.id === 'usr-admin') {
+        logger.warn(`[UserController] [${requestId}] Master admin deletion attempt rejected.`);
+        return sendError(res, 'The master administrator account cannot be deleted.', 403, 'ADMIN_DELETE_FORBIDDEN', requestId);
+      }
+
+      // 4. Authorization check: FACULTY can only delete STUDENTS / CANDIDATES
+      const requesterRole = String(req.user?.role || '').toUpperCase();
+      if (requesterRole === 'FACULTY' && !['STUDENT', 'CANDIDATE'].includes(String(targetUser.role).toUpperCase())) {
+        logger.warn(`[UserController] [${requestId}] Unauthorized delete attempt by ${requesterRole} on user ${userId} with role ${targetUser.role}`);
+        return sendError(res, 'Faculty members can only delete student accounts.', 403, 'FORBIDDEN', requestId);
+      }
+
+      // 5. Remove from memoryStore & mark as deleted tombstone
+      if (index !== -1) {
+        memoryStore.users.splice(index, 1);
+      }
+      memoryStore.deletedUserIds.add(userId);
+
+      // 6. Authoritative deletion from Supabase (tables: users, profiles) & Supabase Auth
+      if (isSupabaseConfigured && supabase) {
+        try {
+          const { error: usersDelErr } = await supabase.from('users').delete().eq('id', userId);
+          if (usersDelErr && usersDelErr.code !== 'PGRST205') {
+            logger.warn(`[UserController] [${requestId}] Supabase delete 'users' error: [${usersDelErr.code}] ${usersDelErr.message}`);
+          }
+        } catch (err) {
+          logger.warn(`[UserController] [${requestId}] Supabase users delete exception: ${err.message}`);
+        }
+
+        try {
+          const { error: profilesDelErr } = await supabase.from('profiles').delete().eq('id', userId);
+          if (profilesDelErr && profilesDelErr.code !== 'PGRST205') {
+            logger.warn(`[UserController] [${requestId}] Supabase delete 'profiles' error: [${profilesDelErr.code}] ${profilesDelErr.message}`);
+          }
+        } catch (err) {
+          logger.warn(`[UserController] [${requestId}] Supabase profiles delete exception: ${err.message}`);
+        }
+
+        if (supabase.auth?.admin?.deleteUser) {
+          try {
+            await supabase.auth.admin.deleteUser(userId);
+          } catch {}
+        }
+      }
+
+      // 7. Cascade: clean up user from all classes
       if (Array.isArray(memoryStore.classes)) {
         for (const cls of memoryStore.classes) {
           let modified = false;
@@ -216,19 +262,25 @@ export class UserController {
             try {
               await supabase.from('classes').update(cls).eq('id', cls.id);
             } catch (clsErr) {
-              logger.warn(`[UserController] Failed to update class ${cls.id}:`, clsErr?.message);
+              logger.warn(`[UserController] [${requestId}] Failed to update class ${cls.id}:`, clsErr?.message);
             }
           }
         }
       }
 
+      // 8. Real-time notification & response
       broadcastDatabaseUpdate({ table: 'users', id: userId, action: 'delete' });
+      broadcastDatabaseUpdate({ table: 'students', id: userId, action: 'delete' });
+      broadcastDatabaseUpdate({ table: 'faculty', id: userId, action: 'delete' });
+
+      logger.info(`[UserController] [${requestId}] User ${userId} (${targetUser.email}) successfully deleted.`);
       return sendSuccess(res, { id: userId, deleted: true }, 'User deleted successfully.');
     } catch (err) {
+      logger.error(`[UserController] [${requestId}] Error deleting user: ${err.message}`);
       if (typeof next === 'function') {
         return next(err);
       }
-      return sendError(res, err.message, err.statusCode || 500, err.errorCode || 'INTERNAL_ERROR');
+      return sendError(res, err.message, err.statusCode || 500, err.errorCode || 'INTERNAL_ERROR', requestId);
     }
   }
 

@@ -76,16 +76,45 @@ app.get('/api/health/database', async (req, res, next) => {
         requestId: req.requestId,
       });
     }
-    const { error } = await supabase.from('users').select('id').limit(1);
+
+    // Test connectivity using users table or profiles table
+    let { data, error } = await supabase.from('users').select('id').limit(1);
+    if (error && error.code === 'PGRST205') {
+      // Check profiles table as well
+      const profilesCheck = await supabase.from('profiles').select('id').limit(1);
+      if (!profilesCheck.error) {
+        error = null;
+      }
+    }
+
     if (error) {
+      if (error.code === 'PGRST205') {
+        return res.status(200).json({
+          success: true,
+          data: {
+            status: 'connected',
+            schema_status: 'pending_migration',
+            notice: 'PostgreSQL connected. Run safe_supabase_migration.sql in Supabase SQL Editor to publish schema cache.',
+          },
+          message: 'Database connected; schema migration pending.',
+          requestId: req.requestId,
+        });
+      }
+
       return res.status(503).json({
         success: false,
-        message: 'Database is unavailable.',
+        message: `Database is unavailable: ${error.message}`,
         errorCode: 'DATABASE_UNAVAILABLE',
         requestId: req.requestId,
       });
     }
-    return res.json({ success: true, data: { status: 'connected' }, message: 'Database is healthy' });
+
+    return res.json({
+      success: true,
+      data: { status: 'connected', schema_status: 'ready' },
+      message: 'Database is healthy',
+      requestId: req.requestId,
+    });
   } catch (err) {
     return next(err);
   }

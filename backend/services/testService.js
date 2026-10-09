@@ -146,6 +146,10 @@ export class TestService {
   }
 
   static async deleteTest(id) {
+    if (!memoryStore.deletedAssessmentIds) memoryStore.deletedAssessmentIds = new Set();
+    if (memoryStore.deletedAssessmentIds.has(id)) return true;
+    memoryStore.deletedAssessmentIds.add(id);
+
     const index = memoryStore.tests.findIndex((t) => t.id === id);
     if (index !== -1) {
       memoryStore.tests.splice(index, 1);

@@ -22,6 +22,9 @@ export const defaultInstitutions = [
 if (!memoryStore.classes) memoryStore.classes = [...defaultClasses];
 if (!memoryStore.departments) memoryStore.departments = [...defaultDepartments];
 if (!memoryStore.institutions) memoryStore.institutions = [...defaultInstitutions];
+if (!memoryStore.deletedClassIds) memoryStore.deletedClassIds = new Set();
+if (!memoryStore.deletedDepartmentIds) memoryStore.deletedDepartmentIds = new Set();
+if (!memoryStore.deletedInstitutionIds) memoryStore.deletedInstitutionIds = new Set();
 
 export class AcademicController {
   // CLASSES
@@ -31,7 +34,7 @@ export class AcademicController {
       const p = Math.max(1, Number(page));
       const l = Math.max(1, Number(limit));
 
-      let list = memoryStore.classes || [];
+      let list = (memoryStore.classes || []).filter((c) => !memoryStore.deletedClassIds?.has(c.id));
       if (department) list = list.filter((c) => c.department === department);
 
       if (isSupabaseConfigured && supabase) {
@@ -42,8 +45,9 @@ export class AcademicController {
           const to = from + l - 1;
           const { data, count, error } = await query.range(from, to);
           if (!error && Array.isArray(data) && data.length > 0) {
-            const total = count ?? data.length;
-            return sendPaginated(res, data, { page: p, limit: l, total, hasMore: p * l < total }, 'Classes retrieved.');
+            const filteredData = data.filter((c) => !memoryStore.deletedClassIds?.has(c.id));
+            const total = count ?? filteredData.length;
+            return sendPaginated(res, filteredData, { page: p, limit: l, total, hasMore: p * l < total }, 'Classes retrieved.');
           }
         } catch {}
       }
@@ -125,6 +129,13 @@ export class AcademicController {
     try {
       const classId = req.params.id;
       if (!classId) return sendError(res, 'Class ID is required.', 400, 'MISSING_FIELDS');
+
+      if (!memoryStore.deletedClassIds) memoryStore.deletedClassIds = new Set();
+      if (memoryStore.deletedClassIds.has(classId)) {
+        return sendSuccess(res, { id: classId, deleted: true, alreadyDeleted: true }, 'Class already deleted.');
+      }
+      memoryStore.deletedClassIds.add(classId);
+
       if (!memoryStore.classes) memoryStore.classes = [];
       memoryStore.classes = memoryStore.classes.filter((c) => c.id !== classId);
 
@@ -164,14 +175,15 @@ export class AcademicController {
       const p = Math.max(1, Number(page));
       const l = Math.max(1, Number(limit));
 
-      let list = memoryStore.departments || [];
+      let list = (memoryStore.departments || []).filter((d) => !memoryStore.deletedDepartmentIds?.has(d.id));
 
       if (isSupabaseConfigured && supabase) {
         try {
           const { data, count, error } = await supabase.from('departments').select('*', { count: 'exact' }).range((p - 1) * l, (p - 1) * l + l - 1);
           if (!error && Array.isArray(data) && data.length > 0) {
-            const total = count ?? data.length;
-            return sendPaginated(res, data, { page: p, limit: l, total, hasMore: p * l < total }, 'Departments retrieved.');
+            const filteredData = data.filter((d) => !memoryStore.deletedDepartmentIds?.has(d.id));
+            const total = count ?? filteredData.length;
+            return sendPaginated(res, filteredData, { page: p, limit: l, total, hasMore: p * l < total }, 'Departments retrieved.');
           }
         } catch {}
       }
@@ -253,6 +265,13 @@ export class AcademicController {
     try {
       const deptId = req.params.id;
       if (!deptId) return sendError(res, 'Department ID is required.', 400, 'MISSING_FIELDS');
+
+      if (!memoryStore.deletedDepartmentIds) memoryStore.deletedDepartmentIds = new Set();
+      if (memoryStore.deletedDepartmentIds.has(deptId)) {
+        return sendSuccess(res, { id: deptId, deleted: true, alreadyDeleted: true }, 'Department already deleted.');
+      }
+      memoryStore.deletedDepartmentIds.add(deptId);
+
       if (!memoryStore.departments) memoryStore.departments = [];
       memoryStore.departments = memoryStore.departments.filter((d) => d.id !== deptId);
 
@@ -278,14 +297,15 @@ export class AcademicController {
       const p = Math.max(1, Number(page));
       const l = Math.max(1, Number(limit));
 
-      let list = memoryStore.institutions || [];
+      let list = (memoryStore.institutions || []).filter((i) => !memoryStore.deletedInstitutionIds?.has(i.id));
 
       if (isSupabaseConfigured && supabase) {
         try {
           const { data, count, error } = await supabase.from('institutions').select('*', { count: 'exact' }).range((p - 1) * l, (p - 1) * l + l - 1);
           if (!error && Array.isArray(data) && data.length > 0) {
-            const total = count ?? data.length;
-            return sendPaginated(res, data, { page: p, limit: l, total, hasMore: p * l < total }, 'Institutions retrieved.');
+            const filteredData = data.filter((i) => !memoryStore.deletedInstitutionIds?.has(i.id));
+            const total = count ?? filteredData.length;
+            return sendPaginated(res, filteredData, { page: p, limit: l, total, hasMore: p * l < total }, 'Institutions retrieved.');
           }
         } catch {}
       }
@@ -339,6 +359,13 @@ export class AcademicController {
     try {
       const instId = req.params.id;
       if (!instId) return sendError(res, 'Institution ID is required.', 400, 'MISSING_FIELDS');
+
+      if (!memoryStore.deletedInstitutionIds) memoryStore.deletedInstitutionIds = new Set();
+      if (memoryStore.deletedInstitutionIds.has(instId)) {
+        return sendSuccess(res, { id: instId, deleted: true, alreadyDeleted: true }, 'Institution already deleted.');
+      }
+      memoryStore.deletedInstitutionIds.add(instId);
+
       if (!memoryStore.institutions) memoryStore.institutions = [];
       memoryStore.institutions = memoryStore.institutions.filter((i) => i.id !== instId);
 

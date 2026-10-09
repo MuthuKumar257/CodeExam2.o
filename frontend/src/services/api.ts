@@ -1,6 +1,6 @@
 import { auth, getLocalStoredUser } from './firebase';
 
-const API_BASE = '';
+const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 const REQUEST_TIMEOUT_MS = 15_000;
 
 export class ApiRequestError extends Error {
@@ -25,10 +25,12 @@ export function normalizeEmail(email: string): string {
 async function request<T>(path: string, options: RequestInit = {}, maxRetries: number = 2): Promise<T> {
   const method = (options.method || 'GET').toUpperCase();
   const isGet = method === 'GET';
+  const isDelete = method === 'DELETE';
+  const requestKey = `${method}:${path}`;
 
-  // Deduplicate identical in-flight GET requests (prevents duplicate requests from StrictMode, re-renders, remounts)
-  if (isGet && !options.signal?.aborted) {
-    const existing = inFlightRequests.get(path);
+  // Deduplicate identical in-flight GET and DELETE requests (prevents duplicate requests from StrictMode, re-renders, multiple clicks)
+  if ((isGet || isDelete) && !options.signal?.aborted) {
+    const existing = inFlightRequests.get(requestKey);
     if (existing) {
       return existing as Promise<T>;
     }
@@ -99,11 +101,11 @@ async function request<T>(path: string, options: RequestInit = {}, maxRetries: n
     }
   };
 
-  if (isGet) {
+  if (isGet || isDelete) {
     const promise = exec().finally(() => {
-      inFlightRequests.delete(path);
+      inFlightRequests.delete(requestKey);
     });
-    inFlightRequests.set(path, promise);
+    inFlightRequests.set(requestKey, promise);
     return promise;
   }
 
@@ -123,7 +125,7 @@ export type DeletableResource =
   | 'tests'
   | 'testcases';
 
-export async function deleteResource(resource: DeletableResource, id: string) {
+export async function deleteResource(resource: DeletableResource, id: string): Promise<{ success: boolean; id: string; alreadyDeleted?: boolean }> {
   if (!id || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(id)) {
     throw new Error(`Invalid ${resource} ID.`);
   }
@@ -139,7 +141,15 @@ export async function deleteResource(resource: DeletableResource, id: string) {
   else if (resource === 'testcases') endpoint = `/api/testcases/${encodeURIComponent(id)}`;
   else endpoint = `/api/db/${resource}/${encodeURIComponent(id)}`;
 
-  return request<{ success: true; id: string }>(endpoint, { method: 'DELETE' });
+  try {
+    return await request<{ success: true; id: string }>(endpoint, { method: 'DELETE' });
+  } catch (err: any) {
+    // If resource is already gone (404), return idempotent success
+    if (err?.status === 404 || err?.errorCode === 'NOT_FOUND' || err?.errorCode === 'USER_NOT_FOUND' || err?.errorCode === 'STUDENT_NOT_FOUND' || err?.errorCode === 'FACULTY_NOT_FOUND' || err?.errorCode === 'CLASS_NOT_FOUND') {
+      return { success: true, id, alreadyDeleted: true };
+    }
+    throw err;
+  }
 }
 
 export async function resetUserPasswordApi(userId: string, newPassword?: string) {

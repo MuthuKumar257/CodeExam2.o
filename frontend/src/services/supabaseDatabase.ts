@@ -12,6 +12,7 @@ import {
 } from './supabase';
 import { supabaseSyncLogger } from './supabaseSyncLogger';
 import { clientWriteQueue } from './clientWriteQueue';
+import { deleteResource, DeletableResource } from './api';
 export { clientWriteQueue };
 export {
   supabase,
@@ -300,8 +301,27 @@ async function persistToBackend(table: string, id: string, data: any) {
 
 async function deleteFromBackend(table: string, id: string) {
   try {
-    await clientWriteQueue.enqueueDelete(table, id);
-  } catch (err) {
+    const validResources: Record<string, DeletableResource> = {
+      users: 'users',
+      students: 'students',
+      faculty: 'faculty',
+      classes: 'classes',
+      departments: 'departments',
+      institutions: 'institutions',
+      questions: 'questions',
+      assessments: 'assessments',
+      tests: 'tests',
+      testcases: 'testcases',
+    };
+    if (validResources[table]) {
+      await deleteResource(validResources[table], id);
+    } else {
+      await clientWriteQueue.enqueueDelete(table, id);
+    }
+  } catch (err: any) {
+    if (err?.status === 404 || err?.alreadyDeleted) {
+      return;
+    }
     console.warn(`[deleteFromBackend] Unhandled delete error for [${table}:${id}]:`, err);
   }
 }

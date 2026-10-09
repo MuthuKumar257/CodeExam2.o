@@ -149,10 +149,14 @@ export class QuestionService {
   }
 
   static async deleteQuestion(id) {
-    const index = memoryStore.questions.findIndex((q) => q.id === id);
-    if (index === -1) return false;
+    if (!memoryStore.deletedQuestionIds) memoryStore.deletedQuestionIds = new Set();
+    if (memoryStore.deletedQuestionIds.has(id)) return true;
+    memoryStore.deletedQuestionIds.add(id);
 
-    memoryStore.questions.splice(index, 1);
+    const index = memoryStore.questions.findIndex((q) => q.id === id);
+    if (index !== -1) {
+      memoryStore.questions.splice(index, 1);
+    }
     memoryStore.testcases = memoryStore.testcases.filter((tc) => tc.question_id !== id);
 
     if (isSupabaseConfigured && supabase) {

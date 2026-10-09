@@ -126,25 +126,43 @@ export class StudentController {
   }
 
   static async deleteStudent(req, res, next) {
+    const requestId = req.requestId || `REQ-${Date.now().toString(36)}`;
     try {
-      const index = memoryStore.users.findIndex((u) => u.id === req.params.id && ['STUDENT', 'CANDIDATE'].includes(String(u.role).toUpperCase()));
+      const studentId = req.params.id;
+      if (!studentId || typeof studentId !== 'string' || !studentId.trim()) {
+        return sendError(res, 'Student ID is required.', 400, 'MISSING_ID', requestId);
+      }
+
+      if (!memoryStore.deletedUserIds) {
+        memoryStore.deletedUserIds = new Set();
+      }
+      if (memoryStore.deletedUserIds.has(studentId)) {
+        return sendSuccess(res, { id: studentId, deleted: true, alreadyDeleted: true }, 'Student already deleted.');
+      }
+
+      const index = memoryStore.users.findIndex((u) => u.id === studentId && ['STUDENT', 'CANDIDATE'].includes(String(u.role).toUpperCase()));
       if (index === -1) {
-        return sendError(res, 'Student not found.', 404, 'NOT_FOUND');
+        return sendError(res, 'Student not found.', 404, 'NOT_FOUND', requestId);
       }
 
       memoryStore.users.splice(index, 1);
+      memoryStore.deletedUserIds.add(studentId);
 
       if (isSupabaseConfigured && supabase) {
         try {
-          await supabase.from('users').delete().eq('id', req.params.id);
+          await supabase.from('users').delete().eq('id', studentId);
+          await supabase.from('profiles').delete().eq('id', studentId);
         } catch {}
+        if (supabase.auth?.admin?.deleteUser) {
+          try { await supabase.auth.admin.deleteUser(studentId); } catch {}
+        }
       }
 
       // Cascade remove student from classes
       if (Array.isArray(memoryStore.classes)) {
         for (const cls of memoryStore.classes) {
-          if (Array.isArray(cls.studentIds) && cls.studentIds.includes(req.params.id)) {
-            cls.studentIds = cls.studentIds.filter((id) => id !== req.params.id);
+          if (Array.isArray(cls.studentIds) && cls.studentIds.includes(studentId)) {
+            cls.studentIds = cls.studentIds.filter((id) => id !== studentId);
             if (isSupabaseConfigured && supabase) {
               try {
                 await supabase.from('classes').update(cls).eq('id', cls.id);
@@ -155,12 +173,15 @@ export class StudentController {
       }
 
       const { broadcastDatabaseUpdate } = await import('../websocket/testSocket.js');
-      broadcastDatabaseUpdate({ table: 'users', id: req.params.id, action: 'delete' });
-      broadcastDatabaseUpdate({ table: 'students', id: req.params.id, action: 'delete' });
+      broadcastDatabaseUpdate({ table: 'users', id: studentId, action: 'delete' });
+      broadcastDatabaseUpdate({ table: 'students', id: studentId, action: 'delete' });
 
-      return sendSuccess(res, { id: req.params.id, deleted: true }, 'Student deleted.');
+      return sendSuccess(res, { id: studentId, deleted: true }, 'Student deleted.');
     } catch (err) {
-      next(err);
+      if (typeof next === 'function') {
+        return next(err);
+      }
+      return sendError(res, err.message, err.statusCode || 500, err.errorCode || 'INTERNAL_ERROR', requestId);
     }
   }
 }

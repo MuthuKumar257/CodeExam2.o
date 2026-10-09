@@ -91,12 +91,21 @@ export class ClientWriteQueue {
       if (!raw) return;
       const parsed: QueuedWriteTask[] = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        parsed.forEach((item) => {
+        // Stale DELETE actions or non-assessment writes that exceeded retry limits should not be re-attempted
+        const validTasks = parsed.filter((item) => {
+          if (item.action === 'DELETE') return false;
+          if (item.retries > 5 && !['submissions', 'attempts', 'sessions', 'answers', 'proctoring_events'].includes(item.table)) {
+            return false;
+          }
+          return true;
+        });
+        validTasks.forEach((item) => {
           item.state = 'PENDING';
           this.queue.push(item);
         });
         this.sortQueue();
-        console.log(`[ClientWriteQueue] Restored ${parsed.length} pending writes from local storage.`);
+        this.persistQueue();
+        console.log(`[ClientWriteQueue] Restored ${validTasks.length} pending writes from local storage.`);
       }
     } catch (err) {
       console.warn('[ClientWriteQueue] Failed to restore pending writes:', err);
@@ -146,7 +155,24 @@ export class ClientWriteQueue {
     const taskKey = `${table}:${recordId}`;
 
     return new Promise((resolve, reject) => {
-      // Coalescing: Check if an identical record is already waiting in queue
+      // 1. In-flight coalescing: If the same record and action is currently in flight, chain resolvers
+      const flightTask = this.inFlight.get(taskKey);
+      if (flightTask && flightTask.action === action) {
+        this.coalescedCount++;
+        const origResolve = flightTask.resolve;
+        const origReject = flightTask.reject;
+        flightTask.resolve = (res) => {
+          origResolve?.(res);
+          resolve(res);
+        };
+        flightTask.reject = (err) => {
+          origReject?.(err);
+          reject(err);
+        };
+        return;
+      }
+
+      // 2. Queue Coalescing: Check if an identical record is already waiting in queue
       const existingIdx = this.queue.findIndex((t) => `${t.table}:${t.recordId}` === taskKey && t.state !== 'SENDING');
       if (existingIdx >= 0) {
         this.coalescedCount++;
@@ -240,23 +266,35 @@ export class ClientWriteQueue {
         }
       );
 
-      if (result.success) {
+      const isAlreadyDeleted =
+        task.action === 'DELETE' &&
+        (result.logEntry?.execution?.httpStatus === 404 ||
+          /not found|already deleted|USER_NOT_FOUND|CLASS_NOT_FOUND/i.test(result.error || ''));
+
+      if (result.success || isAlreadyDeleted) {
         task.state = 'SUCCESS';
         this.processedCount++;
         // Remove task from queue
         const removeIdx = this.queue.findIndex((t) => t.id === task.id);
         if (removeIdx >= 0) this.queue.splice(removeIdx, 1);
         this.persistQueue();
-        task.resolve?.({ success: true, data: result.data });
+        task.resolve?.({ success: true, data: result.data || ({ alreadyDeleted: true } as any) });
       } else {
+        const httpStatus = result.logEntry?.execution?.httpStatus;
+        const errorMsg = String(result.error || '');
+        const isSchemaCacheError = errorMsg.includes('PGRST205') || errorMsg.includes('schema cache');
+        const isValidationError = httpStatus === 400 || /validation|invalid/i.test(errorMsg);
+        const isNotFound = httpStatus === 404;
+        const isPermanentError = isSchemaCacheError || isValidationError || isNotFound;
+
         const isAuthError =
           result.logEntry?.execution?.failureStage === 'HEADER_INSPECTION' ||
-          result.logEntry?.execution?.httpStatus === 401 ||
-          result.logEntry?.execution?.httpStatus === 403;
+          httpStatus === 401 ||
+          httpStatus === 403;
 
         const isCritical = ['submissions', 'attempts', 'sessions', 'answers', 'proctoring_events'].includes(task.table);
 
-        if (task.retries < task.maxRetries || isCritical) {
+        if (!isPermanentError && (task.retries < task.maxRetries || isCritical)) {
           task.retries++;
           task.state = 'RETRY';
           const backoffDelay = isAuthError

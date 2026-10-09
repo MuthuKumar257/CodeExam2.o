@@ -96,30 +96,48 @@ export class FacultyController {
   }
 
   static async deleteFaculty(req, res, next) {
+    const requestId = req.requestId || `REQ-${Date.now().toString(36)}`;
     try {
-      const index = memoryStore.users.findIndex((u) => u.id === req.params.id && u.role === 'FACULTY');
+      const facultyId = req.params.id;
+      if (!facultyId || typeof facultyId !== 'string' || !facultyId.trim()) {
+        return sendError(res, 'Faculty ID is required.', 400, 'MISSING_ID', requestId);
+      }
+
+      if (!memoryStore.deletedUserIds) {
+        memoryStore.deletedUserIds = new Set();
+      }
+      if (memoryStore.deletedUserIds.has(facultyId)) {
+        return sendSuccess(res, { id: facultyId, deleted: true, alreadyDeleted: true }, 'Faculty member already deleted.');
+      }
+
+      const index = memoryStore.users.findIndex((u) => u.id === facultyId && u.role === 'FACULTY');
       if (index === -1) {
-        return sendError(res, 'Faculty member not found.', 404, 'NOT_FOUND');
+        return sendError(res, 'Faculty member not found.', 404, 'NOT_FOUND', requestId);
       }
 
       memoryStore.users.splice(index, 1);
+      memoryStore.deletedUserIds.add(facultyId);
 
       if (isSupabaseConfigured && supabase) {
         try {
-          await supabase.from('users').delete().eq('id', req.params.id);
+          await supabase.from('users').delete().eq('id', facultyId);
+          await supabase.from('profiles').delete().eq('id', facultyId);
         } catch {}
+        if (supabase.auth?.admin?.deleteUser) {
+          try { await supabase.auth.admin.deleteUser(facultyId); } catch {}
+        }
       }
 
       // Cascade remove faculty from classes
       if (Array.isArray(memoryStore.classes)) {
         for (const cls of memoryStore.classes) {
           let modified = false;
-          if (Array.isArray(cls.staffIds) && cls.staffIds.includes(req.params.id)) {
-            cls.staffIds = cls.staffIds.filter((id) => id !== req.params.id);
+          if (Array.isArray(cls.staffIds) && cls.staffIds.includes(facultyId)) {
+            cls.staffIds = cls.staffIds.filter((id) => id !== facultyId);
             modified = true;
           }
-          if (Array.isArray(cls.facultyIds) && cls.facultyIds.includes(req.params.id)) {
-            cls.facultyIds = cls.facultyIds.filter((id) => id !== req.params.id);
+          if (Array.isArray(cls.facultyIds) && cls.facultyIds.includes(facultyId)) {
+            cls.facultyIds = cls.facultyIds.filter((id) => id !== facultyId);
             modified = true;
           }
           if (modified && isSupabaseConfigured && supabase) {
@@ -131,12 +149,15 @@ export class FacultyController {
       }
 
       const { broadcastDatabaseUpdate } = await import('../websocket/testSocket.js');
-      broadcastDatabaseUpdate({ table: 'users', id: req.params.id, action: 'delete' });
-      broadcastDatabaseUpdate({ table: 'faculty', id: req.params.id, action: 'delete' });
+      broadcastDatabaseUpdate({ table: 'users', id: facultyId, action: 'delete' });
+      broadcastDatabaseUpdate({ table: 'faculty', id: facultyId, action: 'delete' });
 
-      return sendSuccess(res, { id: req.params.id, deleted: true }, 'Faculty member deleted.');
+      return sendSuccess(res, { id: facultyId, deleted: true }, 'Faculty member deleted.');
     } catch (err) {
-      next(err);
+      if (typeof next === 'function') {
+        return next(err);
+      }
+      return sendError(res, err.message, err.statusCode || 500, err.errorCode || 'INTERNAL_ERROR', requestId);
     }
   }
 }
