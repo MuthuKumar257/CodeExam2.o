@@ -216,34 +216,44 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({
 
         if (rows.length < 2) throw new Error('Template file must include a header row and at least one question row.');
         const headers = rows[0].map((header) => header.toLowerCase().replace(/[^a-z0-9]/g, ''));
-        const value = (row: string[], name: string) => {
-          const idx = headers.indexOf(name);
-          return idx >= 0 && row[idx] ? String(row[idx]).trim() : '';
+        const value = (row: string[], ...names: string[]) => {
+          for (const name of names) {
+            const idx = headers.indexOf(name);
+            if (idx >= 0 && row[idx] && String(row[idx]).trim()) {
+              return String(row[idx]).trim();
+            }
+          }
+          return '';
         };
 
         const importedQuestions: Question[] = [];
+        const skippedRows: number[] = [];
+
         rows.slice(1).forEach((row, rowIndex) => {
-          const titleValue = value(row, 'title');
-          const problemValue = value(row, 'problemstatement');
-          if (!titleValue || !problemValue) throw new Error(`Row ${rowIndex + 2} needs title and problemStatement.`);
-          const difficultyValue = value(row, 'difficulty').toUpperCase();
+          const titleValue = value(row, 'title', 'question', 'questiontitle', 'name');
+          const problemValue = value(row, 'problemstatement', 'problem', 'statement', 'description', 'problemdescription');
+          if (!titleValue || !problemValue) {
+            skippedRows.push(rowIndex + 2);
+            return;
+          }
+          const difficultyValue = value(row, 'difficulty', 'level').toUpperCase();
           const difficultyValueSafe = ['EASY', 'MEDIUM', 'HARD'].includes(difficultyValue) ? (difficultyValue as QuestionDifficulty) : 'EASY';
-          const publicTestCases = parseTestCases(value(row, 'publictestcases'), true);
-          const hiddenTestCases = parseTestCases(value(row, 'hiddentestcases'), false);
+          const publicTestCases = parseTestCases(value(row, 'publictestcases', 'sampletestcases', 'testcases', 'samplecases'), true);
+          const hiddenTestCases = parseTestCases(value(row, 'hiddentestcases', 'hiddencases', 'hidden'), false);
           const testCases = [...publicTestCases, ...hiddenTestCases];
           importedQuestions.push({
-            id: `q-${Date.now()}-${rowIndex}`,
+            id: `q-${Date.now()}-${rowIndex}-${Math.random().toString(36).slice(2, 6)}`,
             type: 'CODING',
             title: titleValue,
             problemStatement: problemValue,
-            inputFormat: value(row, 'inputformat'),
-            outputFormat: value(row, 'outputformat'),
-            constraints: value(row, 'constraints'),
-            explanation: value(row, 'explanation'),
+            inputFormat: value(row, 'inputformat', 'input'),
+            outputFormat: value(row, 'outputformat', 'output'),
+            constraints: value(row, 'constraints', 'constraint'),
+            explanation: value(row, 'explanation', 'notes'),
             difficulty: difficultyValueSafe,
-            tags: value(row, 'tags').split('|').map((tag) => tag.trim()).filter(Boolean),
-            points: Math.max(1, Number(value(row, 'points')) || 10),
-            inputsCount: Math.max(1, Number(value(row, 'inputscount')) || 1),
+            tags: value(row, 'tags', 'tag', 'category').split('|').map((tag) => tag.trim()).filter(Boolean),
+            points: Math.max(1, Number(value(row, 'points', 'score')) || 10),
+            inputsCount: Math.max(1, Number(value(row, 'inputscount', 'inputs')) || 1),
             pointsPerHiddenTestCase: Math.max(1, Number(value(row, 'pointsperhiddentestcase')) || 10),
             sampleTestCases: publicTestCases.map((testCase) => ({ input: testCase.input, output: testCase.expectedOutput, explanation: testCase.explanation })),
             hiddenTestCases: hiddenTestCases.map((testCase) => ({ input: testCase.input, output: testCase.expectedOutput, explanation: testCase.explanation })),
@@ -252,8 +262,23 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({
             updatedAt: new Date().toISOString(),
           });
         });
-        for (const question of importedQuestions) await onAddQuestion(question);
-        setImportMessage(`${importedQuestions.length} question${importedQuestions.length === 1 ? '' : 's'} imported successfully.`);
+
+        if (importedQuestions.length === 0) {
+          throw new Error('No valid questions found in file. Ensure rows have "Title" and "Problem Statement".');
+        }
+
+        let addedCount = 0;
+        for (const question of importedQuestions) {
+          try {
+            await onAddQuestion(question);
+            addedCount++;
+          } catch (err) {
+            console.error(`Failed to add question ${question.title}:`, err);
+          }
+        }
+
+        const skipNote = skippedRows.length > 0 ? ` (${skippedRows.length} incomplete rows skipped)` : '';
+        setImportMessage(`${addedCount} question${addedCount === 1 ? '' : 's'} imported successfully${skipNote}.`);
       } catch (error) {
         setImportError(error instanceof Error ? error.message : 'Failed to import questions.');
       } finally {

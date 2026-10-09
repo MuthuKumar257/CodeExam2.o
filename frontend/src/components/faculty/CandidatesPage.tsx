@@ -10,6 +10,7 @@ interface CandidatesPageProps {
   classes?: Classroom[];
   users: User[];
   onAddStudent: (classId: string, studentData: { name: string; email: string; registerNo?: string }) => Promise<void>;
+  onAddStudents?: (classId: string, studentsData: Array<{ name: string; email: string; registerNo?: string }>) => Promise<number>;
   onRemoveStudents: (classId: string, studentIds: string[]) => Promise<void>;
   onResetStudentPassword?: (studentId: string) => Promise<string>;
   onDeleteStudentUser?: (studentId: string) => Promise<void>;
@@ -25,6 +26,7 @@ interface ParsedStudent {
   registerNo?: string;
   isValid: boolean;
   errorMsg?: string;
+  statusNote?: string;
 }
 
 export const CandidatesPage: React.FC<CandidatesPageProps> = ({
@@ -32,6 +34,7 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
   classes = [],
   users,
   onAddStudent,
+  onAddStudents,
   onRemoveStudents,
   onResetStudentPassword,
   onDeleteStudentUser,
@@ -282,7 +285,28 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
     }
 
     const parsed: ParsedStudent[] = [];
-    const existingEmails = new Set((users || []).map((s) => (s.email || '').toLowerCase().trim()));
+
+    // Identify users who are faculty or admin - they cannot be imported as students
+    const facultyAdminEmails = new Set(
+      (users || [])
+        .filter((u) => u.role === 'ADMIN' || u.role === 'FACULTY')
+        .map((u) => (u.email || '').toLowerCase().trim())
+        .filter(Boolean)
+    );
+
+    // Identify students currently enrolled in this classroom
+    const enrolledInThisClassEmails = new Set(
+      classStudents.map((s) => (s.email || '').toLowerCase().trim()).filter(Boolean)
+    );
+
+    // Identify student users already in the database
+    const existingStudentEmails = new Set(
+      (users || [])
+        .filter((u) => isStudentUser(u))
+        .map((s) => (s.email || '').toLowerCase().trim())
+        .filter(Boolean)
+    );
+
     const seenEmailsInBatch = new Set<string>();
 
     let nameIdx = -1;
@@ -292,11 +316,34 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
     const firstRow = cleanRows[0];
     firstRow.forEach((col, idx) => {
       const lower = col.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (lower.includes('email') || lower.includes('mailid') || lower === 'mail') {
+      // Email column
+      if (lower.includes('email') || lower.includes('mail')) {
         emailIdx = idx;
-      } else if (lower.includes('reg') || lower.includes('roll') || lower.includes('usn') || lower.includes('identifier') || lower === 'id') {
+      }
+      // Register Number / Roll No / ID / USN / Identifier column
+      else if (
+        lower.includes('reg') ||
+        lower.includes('roll') ||
+        lower.includes('usn') ||
+        lower.includes('identifier') ||
+        lower.includes('matric') ||
+        lower.includes('empid') ||
+        lower.includes('studentid') ||
+        lower.includes('candidateid') ||
+        lower.includes('regno') ||
+        lower.includes('regnumber') ||
+        lower.endsWith('id') ||
+        lower === 'id'
+      ) {
         regIdx = idx;
-      } else if (lower.includes('name') || lower.includes('student') || lower.includes('candidate')) {
+      }
+      // Name column
+      else if (
+        lower.includes('name') ||
+        lower === 'student' ||
+        lower === 'candidate' ||
+        lower === 'fullname'
+      ) {
         nameIdx = idx;
       }
     });
@@ -317,48 +364,87 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
         regNo = regIdx !== -1 ? row[regIdx] || '' : '';
       }
 
-      // If missing via header mapping, apply smart heuristic inspection
+      // Smart heuristic fallback if fields are missing or headers not mapped
       if (!email || !emailRegex.test(email)) {
-        const foundEmailIdx = row.findIndex((c) => c.includes('@'));
+        const foundEmailIdx = row.findIndex((c) => emailRegex.test(c.trim()) || c.includes('@'));
         if (foundEmailIdx !== -1) {
           email = row[foundEmailIdx].trim();
-          const otherCells = row.map((c, i) => ({ val: c.trim(), idx: i })).filter((c) => c.idx !== foundEmailIdx && c.val.length > 0);
-          for (const cell of otherCells) {
-            if (/^\d{1,3}$/.test(cell.val) && otherCells.length > 2) continue; // skip S.No
-            if (!regNo && (/^[A-Za-z0-9_-]{4,20}$/.test(cell.val) || /\d/.test(cell.val))) {
-              regNo = cell.val;
-            } else if (!name && /[A-Za-z]/.test(cell.val)) {
-              name = cell.val;
-            }
-          }
         }
       }
 
-      if (!name && email) {
-        name = email.split('@')[0].replace(/[._-]/g, ' ');
+      const cleanEmail = email.trim().toLowerCase();
+      const otherCells = row
+        .map((c, i) => ({ val: c.trim(), idx: i }))
+        .filter((c) => c.val.length > 0 && c.val.toLowerCase() !== cleanEmail && !c.val.includes('@'));
+
+      if (!regNo) {
+        const regCell = otherCells.find((c) => {
+          if (c.idx === nameIdx) return false;
+          const val = c.val;
+          if (/^\d{1,3}$/.test(val) && otherCells.length > 2) return false; // skip serial number
+          return /^[A-Za-z0-9_-]{4,25}$/.test(val) || /^\d{4,}$/.test(val);
+        });
+        if (regCell) {
+          regNo = regCell.val;
+        }
       }
 
-      const cleanEmail = email.trim().toLowerCase();
+      if (!name) {
+        const nameCell = otherCells.find((c) => {
+          if (c.idx === regIdx) return false;
+          if (c.val === regNo) return false;
+          return /^[A-Za-z\s.'-]{2,60}$/.test(c.val) && !/^\d+$/.test(c.val);
+        });
+        if (nameCell) {
+          name = nameCell.val;
+        } else if (cleanEmail) {
+          name = cleanEmail.split('@')[0].replace(/[._-]/g, ' ');
+        }
+      }
+
       const isValidEmail = emailRegex.test(cleanEmail);
       const isDuplicateInFile = cleanEmail ? seenEmailsInBatch.has(cleanEmail) : false;
-      const isAlreadyInRoster = cleanEmail ? existingEmails.has(cleanEmail) : false;
+      const isFacultyOrAdmin = cleanEmail ? facultyAdminEmails.has(cleanEmail) : false;
+      const isAlreadyInClass = cleanEmail ? enrolledInThisClassEmails.has(cleanEmail) : false;
+      const isExistingStudent = cleanEmail ? existingStudentEmails.has(cleanEmail) : false;
 
-      let isValid = isValidEmail && name.length > 0 && !isDuplicateInFile && !isAlreadyInRoster;
+      let isValid = isValidEmail && name.trim().length > 0 && !isDuplicateInFile && !isFacultyOrAdmin;
       let errorMsg: string | undefined;
+      let statusNote: string | undefined;
 
-      if (!cleanEmail) errorMsg = 'Missing Email Address';
-      else if (!isValidEmail) errorMsg = 'Invalid Email Format';
-      else if (isDuplicateInFile) errorMsg = 'Duplicate email in file';
-      else if (isAlreadyInRoster) errorMsg = 'Email already in roster';
-      else if (!name) errorMsg = 'Missing Name';
-      else seenEmailsInBatch.add(cleanEmail);
+      if (!cleanEmail) {
+        errorMsg = 'Missing Email Address';
+        isValid = false;
+      } else if (!isValidEmail) {
+        errorMsg = 'Invalid Email Format';
+        isValid = false;
+      } else if (isDuplicateInFile) {
+        errorMsg = 'Duplicate email in file';
+        isValid = false;
+      } else if (isFacultyOrAdmin) {
+        errorMsg = 'Email belongs to Faculty/Admin account';
+        isValid = false;
+      } else if (!name.trim()) {
+        errorMsg = 'Missing Name';
+        isValid = false;
+      } else {
+        seenEmailsInBatch.add(cleanEmail);
+        if (isAlreadyInClass) {
+          statusNote = 'Enrolled in class (details will update)';
+        } else if (isExistingStudent) {
+          statusNote = 'Existing student (will enroll in class)';
+        } else {
+          statusNote = 'New candidate';
+        }
+      }
 
       parsed.push({
-        name: name || (cleanEmail ? cleanEmail.split('@')[0] : 'Unknown Student'),
+        name: name.trim() || (cleanEmail ? cleanEmail.split('@')[0] : 'Unknown Student'),
         email: cleanEmail,
-        registerNo: regNo || undefined,
+        registerNo: regNo ? regNo.trim() : undefined,
         isValid,
         errorMsg,
+        statusNote,
       });
     });
 
@@ -369,6 +455,21 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
     if (!text.trim()) {
       setBulkStudents([]);
       return;
+    }
+
+    try {
+      // Use XLSX CSV parser first to handle escaped quotes and delimiters properly
+      const workbook = XLSX.read(text, { type: 'string' });
+      if (workbook.SheetNames && workbook.SheetNames.length > 0) {
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rawRows = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, defval: '' });
+        if (rawRows.length > 0) {
+          processRawStudentRows(rawRows);
+          return;
+        }
+      }
+    } catch {
+      // Fallback manual CSV/TSV parser below
     }
 
     const lines = text.split(/\r?\n/);
@@ -399,37 +500,38 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const isBinary = !file.name.toLowerCase().endsWith('.csv') && !file.name.toLowerCase().endsWith('.txt') && !file.name.toLowerCase().endsWith('.tsv');
     const reader = new FileReader();
 
     reader.onload = (event) => {
       try {
-        if (isBinary) {
-          const buffer = new Uint8Array(event.target?.result as ArrayBuffer);
-          const workbook = XLSX.read(buffer, { type: 'array' });
-          if (!workbook.SheetNames || workbook.SheetNames.length === 0) return;
-          const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-          const rawRows = XLSX.utils.sheet_to_json<string[]>(firstSheet, { header: 1, defval: '' });
-          const csvText = XLSX.utils.sheet_to_csv(firstSheet);
-          setBulkText(csvText);
-          processRawStudentRows(rawRows);
-        } else {
-          const text = event.target?.result as string;
-          setBulkText(text);
-          parseTextRows(text);
+        const buffer = new Uint8Array(event.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(buffer, { type: 'array' });
+        if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+          setActionErrorMsg('The uploaded spreadsheet contains no worksheets.');
+          return;
         }
-      } catch (err) {
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rawRows = XLSX.utils.sheet_to_json<string[]>(firstSheet, { header: 1, defval: '' });
+        const csvText = XLSX.utils.sheet_to_csv(firstSheet);
+        setBulkText(csvText);
+        processRawStudentRows(rawRows);
+      } catch (err: any) {
         console.error('File parsing error in CandidatesPage:', err);
+        try {
+          const textReader = new FileReader();
+          textReader.onload = (te) => {
+            const text = String(te.target?.result || '');
+            setBulkText(text);
+            parseTextRows(text);
+          };
+          textReader.readAsText(file);
+        } catch {
+          setActionErrorMsg('Failed to parse uploaded file. Please verify CSV or Excel format.');
+        }
       }
     };
 
-    if (isBinary) {
-      reader.readAsArrayBuffer(file);
-    } else {
-      reader.readAsText(file);
-    }
-
-    // Reset input so re-uploading the same file works
+    reader.readAsArrayBuffer(file);
     e.target.value = '';
   };
 
@@ -466,29 +568,69 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
 
     setIsSubmitting(true);
     setSuccessMsg('');
+    setActionErrorMsg('');
     setImportProgress({ current: 0, total: validStudents.length });
 
     try {
-      for (let i = 0; i < validStudents.length; i++) {
-        const student = validStudents[i];
-        await onAddStudent(selectedClass.id, {
-          name: student.name.trim(),
-          email: student.email.trim().toLowerCase(),
-          registerNo: student.registerNo ? student.registerNo.trim() : undefined,
-        });
-        setImportProgress({ current: i + 1, total: validStudents.length });
-      }
+      if (onAddStudents) {
+        // Fast atomic batch path
+        const count = await onAddStudents(
+          selectedClass.id,
+          validStudents.map((s) => ({
+            name: s.name.trim(),
+            email: s.email.trim().toLowerCase(),
+            registerNo: s.registerNo ? s.registerNo.trim() : undefined,
+          }))
+        );
+        setImportProgress({ current: count, total: validStudents.length });
+        setSuccessMsg(`Successfully imported and enrolled ${count} candidate(s)!`);
+        setBulkText('');
+        setBulkStudents([]);
+        setTimeout(() => {
+          setSuccessMsg('');
+          setShowAddModal(false);
+          setImportProgress(null);
+        }, 1800);
+      } else {
+        // Resilient per-student loop
+        let successCount = 0;
+        const failed: string[] = [];
 
-      setSuccessMsg(`Successfully imported and enrolled ${validStudents.length} students!`);
-      setBulkText('');
-      setBulkStudents([]);
-      setTimeout(() => {
-        setSuccessMsg('');
-        setShowAddModal(false);
-        setImportProgress(null);
-      }, 2000);
-    } catch (err) {
+        for (let i = 0; i < validStudents.length; i++) {
+          const student = validStudents[i];
+          try {
+            await onAddStudent(selectedClass.id, {
+              name: student.name.trim(),
+              email: student.email.trim().toLowerCase(),
+              registerNo: student.registerNo ? student.registerNo.trim() : undefined,
+            });
+            successCount++;
+          } catch (err: any) {
+            console.error(`Failed to add candidate ${student.email}:`, err);
+            failed.push(student.email);
+          }
+          setImportProgress({ current: i + 1, total: validStudents.length });
+        }
+
+        if (successCount > 0) {
+          const failMsg = failed.length > 0 ? ` (${failed.length} skipped)` : '';
+          setSuccessMsg(`Successfully enrolled ${successCount} candidates!${failMsg}`);
+          setBulkText('');
+          setBulkStudents([]);
+          setTimeout(() => {
+            setSuccessMsg('');
+            setShowAddModal(false);
+            setImportProgress(null);
+          }, 2000);
+        } else {
+          setActionErrorMsg(`Failed to import candidates: ${failed.join(', ')}`);
+          setImportProgress(null);
+        }
+      }
+    } catch (err: any) {
       console.error('Bulk import error:', err);
+      setActionErrorMsg(err?.message || 'Bulk import failed. Please check candidate details and try again.');
+      setImportProgress(null);
     } finally {
       setIsSubmitting(false);
     }
@@ -739,6 +881,21 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
 
             {/* Modal Body */}
             <div className="p-6 overflow-y-auto space-y-4 flex-1">
+              {actionErrorMsg && (
+                <div className="p-3.5 bg-rose-500/10 border border-rose-500/25 rounded-xl text-rose-300 text-xs flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span>{actionErrorMsg}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActionErrorMsg('')}
+                    className="text-rose-400 hover:text-rose-200 text-xs font-bold cursor-pointer"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              )}
               {successMsg ? (
                 <div className="p-6 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-center space-y-3">
                   <CheckCircle2 className="w-12 h-12 text-emerald-400 mx-auto animate-bounce" />
@@ -902,43 +1059,48 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
                   {bulkStudents.length > 0 && (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between text-slate-400">
-                        <span className="font-bold">Live Grid Parse Preview ({bulkStudents.filter(s => s.isValid).length} Valid Students parsed)</span>
+                        <span className="font-bold text-white text-xs">
+                          Live Grid Parse Preview ({bulkStudents.filter((s) => s.isValid).length} of {bulkStudents.length} Valid Candidates)
+                        </span>
                         <button
                           type="button"
                           onClick={() => {
                             setBulkStudents([]);
                             setBulkText('');
                           }}
-                          className="text-rose-400 hover:text-rose-300 flex items-center gap-1 font-bold"
+                          className="text-rose-400 hover:text-rose-300 flex items-center gap-1 font-bold text-xs cursor-pointer"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                           <span>Clear Preview</span>
                         </button>
                       </div>
 
-                      <div className="border border-slate-800 rounded-xl overflow-hidden max-h-[180px] overflow-y-auto bg-slate-950">
+                      <div className="border border-slate-800 rounded-xl overflow-hidden max-h-[220px] overflow-y-auto bg-slate-950">
                         <table className="w-full text-left text-[11px] text-slate-300">
                           <thead className="bg-slate-900 text-slate-400 border-b border-slate-800 font-semibold sticky top-0">
                             <tr>
                               <th className="p-2.5">Name</th>
                               <th className="p-2.5">Register No.</th>
                               <th className="p-2.5">Email Address</th>
-                              <th className="p-2.5 text-right">Parsed Checks</th>
+                              <th className="p-2.5 text-right">Status / Validation</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-900/60 font-mono">
                             {bulkStudents.map((student, idx) => (
-                              <tr key={idx} className={student.isValid ? 'hover:bg-slate-900/40' : 'bg-rose-950/15 text-rose-300'}>
-                                <td className="p-2.5 font-sans font-medium">{student.name}</td>
+                              <tr key={idx} className={student.isValid ? 'hover:bg-slate-900/40' : 'bg-rose-950/20 text-rose-300'}>
+                                <td className="p-2.5 font-sans font-medium text-white">{student.name}</td>
                                 <td className="p-2.5 font-bold uppercase text-indigo-400">{student.registerNo || 'N/A'}</td>
-                                <td className="p-2.5 text-slate-400">{student.email || 'None'}</td>
+                                <td className="p-2.5 text-slate-300">{student.email || 'None'}</td>
                                 <td className="p-2.5 text-right font-sans font-bold">
                                   {student.isValid ? (
-                                    <span className="text-emerald-400">● Valid Record</span>
+                                    <span className="text-emerald-400 inline-flex items-center gap-1 text-[11px]">
+                                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                                      <span>{student.statusNote || 'Valid Record'}</span>
+                                    </span>
                                   ) : (
-                                    <span className="text-rose-400 flex items-center justify-end gap-1 text-[10px]">
-                                      <AlertCircle className="w-3 h-3" />
-                                      {student.errorMsg}
+                                    <span className="text-rose-400 inline-flex items-center justify-end gap-1 text-[10px]">
+                                      <AlertCircle className="w-3 h-3 text-rose-400" />
+                                      <span>{student.errorMsg}</span>
                                     </span>
                                   )}
                                 </td>
@@ -955,7 +1117,7 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
                     <button
                       type="button"
                       onClick={() => setShowAddModal(false)}
-                      className="px-4 py-2 rounded-xl text-xs bg-slate-800 text-slate-300 hover:bg-slate-700"
+                      className="px-4 py-2 rounded-xl text-xs bg-slate-800 text-slate-300 hover:bg-slate-700 cursor-pointer"
                     >
                       Close
                     </button>
@@ -963,14 +1125,21 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
                       type="button"
                       disabled={bulkStudents.filter((s) => s.isValid).length === 0 || isSubmitting}
                       onClick={handleBulkSubmit}
-                      className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50 flex items-center space-x-1.5"
+                      className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50 flex items-center space-x-1.5 transition cursor-pointer"
                     >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>
-                        {isSubmitting
-                          ? 'Importing...'
-                          : `Bulk Enroll ${bulkStudents.filter((s) => s.isValid).length} Candidates`}
-                      </span>
+                      {isSubmitting ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Importing Candidates...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>
+                            {`Bulk Enroll ${bulkStudents.filter((s) => s.isValid).length} Candidate${bulkStudents.filter((s) => s.isValid).length === 1 ? '' : 's'}`}
+                          </span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>

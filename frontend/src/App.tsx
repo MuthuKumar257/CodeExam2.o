@@ -1357,6 +1357,7 @@ export default function App() {
           role: 'CANDIDATE',
           registerNumber: regUpper || `REG${Date.now().toString().slice(-4)}`,
           registerNo: regUpper || `REG${Date.now().toString().slice(-4)}`,
+          ...((regUpper ? { register_number: regUpper } : { register_number: `REG${Date.now().toString().slice(-4)}` }) as any),
           institutionId: currentUser?.institutionId || 'inst-1',
           createdAt: new Date().toISOString(),
           status: 'ACTIVE',
@@ -1365,11 +1366,13 @@ export default function App() {
         setUsers((prev) => [...prev, studentUser]);
         await saveUserToFirestore(studentUser);
       } else {
+        const resolvedReg = regUpper || existingUser.registerNumber || existingUser.registerNo || (existingUser as any).register_number;
         studentUser = {
           ...existingUser,
           name: studentData.name || existingUser.name,
-          registerNumber: regUpper || existingUser.registerNumber || existingUser.registerNo,
-          registerNo: regUpper || existingUser.registerNo || existingUser.registerNumber,
+          registerNumber: resolvedReg,
+          registerNo: resolvedReg,
+          ...((resolvedReg ? { register_number: resolvedReg } : {}) as any),
           classIds: [classId], // strictly 1 class
           updatedAt: new Date().toISOString(),
         };
@@ -1417,6 +1420,107 @@ export default function App() {
       );
     } catch (e) {
       console.error('Failed to add student to class:', e);
+      throw e;
+    }
+  };
+
+  const handleAddStudentsToClass = async (
+    classId: string,
+    studentsData: Array<{ name: string; email: string; registerNo?: string }>
+  ): Promise<number> => {
+    try {
+      if (!studentsData || studentsData.length === 0) return 0;
+
+      const updatedUsersList: User[] = [];
+      const newStudentIdsForClass: string[] = [];
+
+      setUsers((prevUsers) => {
+        const currentUsers = [...prevUsers];
+
+        for (let i = 0; i < studentsData.length; i++) {
+          const item = studentsData[i];
+          const emailLower = (item.email || '').toLowerCase().trim();
+          if (!emailLower) continue;
+
+          const regUpper = item.registerNo ? String(item.registerNo).toUpperCase().trim() : undefined;
+
+          const existingIdx = currentUsers.findIndex(
+            (u) =>
+              (u.email ? String(u.email).toLowerCase().trim() === emailLower : false) ||
+              (regUpper && u.registerNumber && String(u.registerNumber).toUpperCase().trim() === regUpper) ||
+              (regUpper && u.registerNo && String(u.registerNo).toUpperCase().trim() === regUpper)
+          );
+
+          let studentUser: User;
+          if (existingIdx === -1) {
+            const newUid = `stu-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`;
+            const defaultReg = regUpper || `REG${Date.now().toString().slice(-4)}${i}`;
+            studentUser = {
+              id: newUid,
+              name: item.name.trim(),
+              email: emailLower,
+              role: 'CANDIDATE',
+              registerNumber: defaultReg,
+              registerNo: defaultReg,
+              ...((defaultReg ? { register_number: defaultReg } : {}) as any),
+              institutionId: currentUser?.institutionId || 'inst-1',
+              createdAt: new Date().toISOString(),
+              status: 'ACTIVE',
+              classIds: [classId],
+            };
+            currentUsers.push(studentUser);
+          } else {
+            const existing = currentUsers[existingIdx];
+            const resolvedReg = regUpper || existing.registerNumber || existing.registerNo || (existing as any).register_number || '';
+            studentUser = {
+              ...existing,
+              name: item.name.trim() || existing.name,
+              registerNumber: resolvedReg || undefined,
+              registerNo: resolvedReg || undefined,
+              ...((resolvedReg ? { register_number: resolvedReg } : {}) as any),
+              classIds: [classId],
+              updatedAt: new Date().toISOString(),
+            };
+            currentUsers[existingIdx] = studentUser;
+          }
+
+          updatedUsersList.push(studentUser);
+          newStudentIdsForClass.push(studentUser.id);
+        }
+
+        return currentUsers;
+      });
+
+      // Persist users to backend
+      for (const student of updatedUsersList) {
+        saveUserToFirestore(student).catch(console.error);
+      }
+
+      // Update classes in batch: add all newStudentIdsForClass to target class and remove from others
+      const targetIdsSet = new Set(newStudentIdsForClass);
+      setClasses((prevClasses) =>
+        prevClasses.map((cls) => {
+          const currentStudents = cls.studentIds || [];
+          if (cls.id === classId) {
+            const merged = Array.from(new Set([...currentStudents, ...newStudentIdsForClass]));
+            const updatedCls = { ...cls, studentIds: merged };
+            saveClassToFirestore(updatedCls).catch(console.error);
+            return updatedCls;
+          } else {
+            const filtered = currentStudents.filter((id) => !targetIdsSet.has(id));
+            if (filtered.length !== currentStudents.length) {
+              const updatedCls = { ...cls, studentIds: filtered };
+              saveClassToFirestore(updatedCls).catch(console.error);
+              return updatedCls;
+            }
+            return cls;
+          }
+        })
+      );
+
+      return updatedUsersList.length;
+    } catch (e) {
+      console.error('Failed to bulk add students to class:', e);
       throw e;
     }
   };
@@ -3475,6 +3579,7 @@ export default function App() {
                     classes={classes}
                     users={users}
                     onAddStudent={handleAddStudentToClass}
+                    onAddStudents={handleAddStudentsToClass}
                     onRemoveStudents={handleRemoveStudentsFromClass}
                     onResetStudentPassword={(sid) => handleResetUserPassword(sid, 'CANDIDATE')}
                     onDeleteStudentUser={handleDeleteUser}
