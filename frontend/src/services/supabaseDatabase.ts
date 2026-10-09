@@ -480,6 +480,12 @@ let isFetchingQuestions = false;
 let isFetchingSessions = false;
 let isFetchingSubmissions = false;
 
+export function isStudentUser(user: any): boolean {
+  if (!user) return false;
+  const role = String(user.role || '').trim().toUpperCase();
+  return role === 'CANDIDATE' || role === 'STUDENT';
+}
+
 export function normalizeUserFields(user: any): User {
   if (!user || typeof user !== 'object') return user;
   const rawReg = user.registerNumber ?? user.register_number ?? user.registerNo ?? user.rollNumber;

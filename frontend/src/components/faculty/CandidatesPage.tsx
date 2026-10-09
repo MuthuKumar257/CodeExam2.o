@@ -282,7 +282,7 @@ export const CandidatesPage: React.FC<CandidatesPageProps> = ({
     }
 
     const parsed: ParsedStudent[] = [];
-    const existingEmails = new Set(students.map((s) => (s.email || '').toLowerCase().trim()));
+    const existingEmails = new Set((users || []).map((s) => (s.email || '').toLowerCase().trim()));
     const seenEmailsInBatch = new Set<string>();
 
     let nameIdx = -1;
