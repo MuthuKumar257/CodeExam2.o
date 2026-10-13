@@ -491,6 +491,10 @@ export interface CodeExecutionResult {
   memoryUsageMb?: number;
   testCasesPassed?: number;
   totalTestCases?: number;
+  score?: number;
+  marks?: number;
+  maxScore?: number;
+  maxMarks?: number;
   testCaseResults?: {
     id: string;
     passed: boolean;
