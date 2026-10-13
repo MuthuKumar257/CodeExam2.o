@@ -719,7 +719,7 @@ export async function fetchReportsApi(params: { page?: number; limit?: number; s
   return request<PaginatedResponse<any>>(`/api/reports${qStr ? `?${qStr}` : ''}`, { signal: params.signal });
 }
 
-// Bulk Student Import (/api/students/bulk-import)
+// Bulk Student Import (/api/students/bulk-import or /api/students/import)
 export async function bulkImportStudentsApi(students: Array<{
   name: string;
   email: string;
@@ -733,8 +733,12 @@ export async function bulkImportStudentsApi(students: Array<{
     skippedCount: number;
     duplicatesInFile: number;
     duplicatesInDatabase: number;
-    skippedEmails: string[];
-    importedStudents: any[];
+    skippedEmails?: string[];
+    imported?: any[];
+    importedStudents?: any[];
+    alreadyRegistered?: any[];
+    failures?: any[];
+    totalProcessed?: number;
   };
   message: string;
 }> {
@@ -743,3 +747,22 @@ export async function bulkImportStudentsApi(students: Array<{
     body: JSON.stringify({ students }),
   });
 }
+
+export const importStudentsApi = bulkImportStudentsApi;
+
+export async function createStudentApi(student: {
+  name: string;
+  email: string;
+  registerNumber?: string;
+  department?: string;
+  password?: string;
+  role?: string;
+  institution_id?: string;
+  [key: string]: any;
+}): Promise<any> {
+  return request('/api/students', {
+    method: 'POST',
+    body: JSON.stringify(student),
+  });
+}
+

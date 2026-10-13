@@ -1,5 +1,5 @@
 import { UserService } from '../services/userService.js';
-import { memoryStore, supabase, isSupabaseConfigured } from '../services/supabaseService.js';
+import { memoryStore, supabase, isSupabaseConfigured, savePersistentStore } from '../services/supabaseService.js';
 import { sendSuccess, sendPaginated, sendError } from '../utils/response.js';
 
 export class StudentController {
@@ -55,6 +55,9 @@ export class StudentController {
     } catch (err) {
       if (err.errorCode === 'EMAIL_ALREADY_EXISTS') {
         return sendError(res, err.message, 409, 'EMAIL_ALREADY_EXISTS');
+      }
+      if (err.errorCode === 'REGISTER_NUMBER_ALREADY_EXISTS') {
+        return sendError(res, err.message, 409, 'REGISTER_NUMBER_ALREADY_EXISTS');
       }
       if (err.errorCode === 'MISSING_FIELDS' || err.errorCode === 'INVALID_EMAIL') {
         return sendError(res, err.message, 400, err.errorCode);
@@ -118,6 +121,8 @@ export class StudentController {
         } catch {}
       }
 
+      savePersistentStore();
+
       const { password: _, ...safeStudent } = updated;
       return sendSuccess(res, safeStudent, 'Student updated successfully.');
     } catch (err) {
@@ -171,6 +176,8 @@ export class StudentController {
           }
         }
       }
+
+      savePersistentStore();
 
       const { broadcastDatabaseUpdate } = await import('../websocket/testSocket.js');
       broadcastDatabaseUpdate({ table: 'users', id: studentId, action: 'delete' });

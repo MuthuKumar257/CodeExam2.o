@@ -123,8 +123,9 @@ import {
   safeGetUser,
   validateCoreRlsPolicies,
   supabaseSyncLogger,
+  refreshStudentsFromDatabase,
 } from './services/firebase';
-import { resetUserPasswordApi } from './services/api';
+import { resetUserPasswordApi, bulkImportStudentsApi, createStudentApi } from './services/api';
 import { RestartTestOptions } from './components/common/RestartTestModal';
 
 export default function App() {
@@ -810,7 +811,7 @@ export default function App() {
     password?: string;
   }) => {
     try {
-      const uid = `user-${Date.now()}`;
+      let uid = `user-${Date.now()}`;
       const defaultPass = userData.role === 'FACULTY' ? 'Faculty@123' : userData.role === 'CANDIDATE' ? 'Student@123' : 'admin@123';
       
       // Enforce One Student One Class rule
@@ -819,6 +820,25 @@ export default function App() {
         : userData.role === 'CANDIDATE'
         ? []
         : userData.classIds || [];
+
+      if (userData.role === 'CANDIDATE' || userData.role === 'STUDENT') {
+        try {
+          const apiRes = await createStudentApi({
+            name: userData.name,
+            email: userData.email,
+            registerNumber: userData.registerNumber,
+            role: 'STUDENT',
+            department: userData.department,
+            institution_id: userData.institutionId || currentUser?.institutionId || 'inst-1',
+            password: userData.password || defaultPass,
+          });
+          if (apiRes?.data?.id) {
+            uid = apiRes.data.id;
+          }
+        } catch (apiErr) {
+          console.warn('[handleAddUser] createStudentApi error/fallback:', apiErr);
+        }
+      }
 
       const newUser: User = {
         id: uid,
@@ -839,7 +859,7 @@ export default function App() {
       // Optimistic state update
       setUsers((prev) => [...prev.filter((u) => u.id !== newUser.id && u.email !== newUser.email), newUser]);
 
-      // Save user to Firestore
+      // Save user to Firestore / cache
       await saveUserToFirestore(newUser);
 
       if (userData.role === 'CANDIDATE') {
@@ -1351,20 +1371,36 @@ export default function App() {
       let studentUser: User;
 
       if (!existingUser) {
+        let createdStudent: any = null;
+        try {
+          const apiRes = await createStudentApi({
+            name: studentData.name,
+            email: studentData.email,
+            registerNumber: regUpper || undefined,
+            role: 'STUDENT',
+            institution_id: currentUser?.institutionId || 'inst-1',
+          });
+          createdStudent = apiRes?.data || apiRes;
+        } catch (apiErr) {
+          console.warn('[handleAddStudentToClass] createStudentApi fallback:', apiErr);
+        }
+
+        const studentId = createdStudent?.id || `stu-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
         studentUser = {
-          id: `stu-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          ...createdStudent,
+          id: studentId,
           name: studentData.name,
           email: studentData.email,
           role: 'CANDIDATE',
-          registerNumber: regUpper || `REG${Date.now().toString().slice(-4)}`,
-          registerNo: regUpper || `REG${Date.now().toString().slice(-4)}`,
+          registerNumber: regUpper || createdStudent?.registerNumber || `REG${Date.now().toString().slice(-4)}`,
+          registerNo: regUpper || createdStudent?.registerNo || `REG${Date.now().toString().slice(-4)}`,
           ...((regUpper ? { register_number: regUpper } : { register_number: `REG${Date.now().toString().slice(-4)}` }) as any),
           institutionId: currentUser?.institutionId || 'inst-1',
           createdAt: new Date().toISOString(),
           status: 'ACTIVE',
           classIds: [classId],
         };
-        setUsers((prev) => [...prev, studentUser]);
+        setUsers((prev) => [...prev.filter((u) => u.id !== studentUser.id), studentUser]);
         await saveUserToFirestore(studentUser);
       } else {
         const resolvedReg = regUpper || existingUser.registerNumber || existingUser.registerNo || (existingUser as any).register_number;
@@ -1432,94 +1468,42 @@ export default function App() {
     try {
       if (!studentsData || studentsData.length === 0) return 0;
 
-      const updatedUsersList: User[] = [];
-      const newStudentIdsForClass: string[] = [];
+      const payload = studentsData.map((s) => ({
+        name: s.name.trim(),
+        email: s.email.trim().toLowerCase(),
+        registerNumber: s.registerNo ? s.registerNo.trim() : undefined,
+      }));
 
-      setUsers((prevUsers) => {
-        const currentUsers = [...prevUsers];
+      // 1. Authoritatively persist students to Supabase & backend
+      const result = await bulkImportStudentsApi(payload);
+      const resData = result?.data || (result as any);
+      const count = resData?.importedCount ?? (resData?.imported?.length || 0);
 
-        for (let i = 0; i < studentsData.length; i++) {
-          const item = studentsData[i];
-          const emailLower = (item.email || '').toLowerCase().trim();
-          if (!emailLower) continue;
+      // 2. Refresh students from database to ensure consistency
+      const refreshedUsers = await refreshStudentsFromDatabase();
 
-          const regUpper = item.registerNo ? String(item.registerNo).toUpperCase().trim() : undefined;
-
-          const existingIdx = currentUsers.findIndex(
-            (u) =>
-              (u.email ? String(u.email).toLowerCase().trim() === emailLower : false) ||
-              (regUpper && u.registerNumber && String(u.registerNumber).toUpperCase().trim() === regUpper) ||
-              (regUpper && u.registerNo && String(u.registerNo).toUpperCase().trim() === regUpper)
-          );
-
-          let studentUser: User;
-          if (existingIdx === -1) {
-            const newUid = `stu-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`;
-            const defaultReg = regUpper || `REG${Date.now().toString().slice(-4)}${i}`;
-            studentUser = {
-              id: newUid,
-              name: item.name.trim(),
-              email: emailLower,
-              role: 'CANDIDATE',
-              registerNumber: defaultReg,
-              registerNo: defaultReg,
-              ...((defaultReg ? { register_number: defaultReg } : {}) as any),
-              institutionId: currentUser?.institutionId || 'inst-1',
-              createdAt: new Date().toISOString(),
-              status: 'ACTIVE',
-              classIds: [classId],
-            };
-            currentUsers.push(studentUser);
-          } else {
-            const existing = currentUsers[existingIdx];
-            const resolvedReg = regUpper || existing.registerNumber || existing.registerNo || (existing as any).register_number || '';
-            studentUser = {
-              ...existing,
-              name: item.name.trim() || existing.name,
-              registerNumber: resolvedReg || undefined,
-              registerNo: resolvedReg || undefined,
-              ...((resolvedReg ? { register_number: resolvedReg } : {}) as any),
-              classIds: [classId],
-              updatedAt: new Date().toISOString(),
-            };
-            currentUsers[existingIdx] = studentUser;
-          }
-
-          updatedUsersList.push(studentUser);
-          newStudentIdsForClass.push(studentUser.id);
+      // 3. Find IDs of students in this batch and enroll them in class
+      const targetStudentIds: string[] = [];
+      for (const item of studentsData) {
+        const emailLower = (item.email || '').toLowerCase().trim();
+        const found = refreshedUsers.find((u) => u.email?.toLowerCase().trim() === emailLower);
+        if (found) {
+          targetStudentIds.push(found.id);
         }
-
-        return currentUsers;
-      });
-
-      // Persist users to backend
-      for (const student of updatedUsersList) {
-        saveUserToFirestore(student).catch(console.error);
       }
 
-      // Update classes in batch: add all newStudentIdsForClass to target class and remove from others
-      const targetIdsSet = new Set(newStudentIdsForClass);
-      setClasses((prevClasses) =>
-        prevClasses.map((cls) => {
-          const currentStudents = cls.studentIds || [];
-          if (cls.id === classId) {
-            const merged = Array.from(new Set([...currentStudents, ...newStudentIdsForClass]));
-            const updatedCls = { ...cls, studentIds: merged };
-            saveClassToFirestore(updatedCls).catch(console.error);
-            return updatedCls;
-          } else {
-            const filtered = currentStudents.filter((id) => !targetIdsSet.has(id));
-            if (filtered.length !== currentStudents.length) {
-              const updatedCls = { ...cls, studentIds: filtered };
-              saveClassToFirestore(updatedCls).catch(console.error);
-              return updatedCls;
-            }
-            return cls;
-          }
-        })
-      );
+      // 4. Update class roster
+      if (targetStudentIds.length > 0) {
+        const cls = classes.find((c) => c.id === classId);
+        if (cls) {
+          const merged = Array.from(new Set([...(cls.studentIds || []), ...targetStudentIds]));
+          const updatedCls = { ...cls, studentIds: merged };
+          await saveClassToFirestore(updatedCls);
+          setClasses((prev) => prev.map((c) => (c.id === classId ? updatedCls : c)));
+        }
+      }
 
-      return updatedUsersList.length;
+      return count > 0 ? count : targetStudentIds.length;
     } catch (e) {
       console.error('Failed to bulk add students to class:', e);
       throw e;

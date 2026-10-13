@@ -13,9 +13,10 @@ import {
   Users,
   GraduationCap,
   Sparkles,
-  Check,
 } from 'lucide-react';
 import { User, Classroom } from '../../types';
+import { bulkImportStudentsApi } from '../../services/api';
+import { saveClassToFirestore, refreshStudentsFromDatabase } from '../../services/firebase';
 
 interface BulkImportModalProps {
   isOpen: boolean;
@@ -330,29 +331,70 @@ Dr. John von Neumann, neumann@university.edu, EMP-103, Electronics & Communicati
     setErrorMsg(null);
     setImportProgress({ current: 0, total: validRecords.length });
 
-    let importedCount = 0;
     const defaultPassword = isStudent ? 'Student@123' : 'Faculty@123';
 
+    if (isStudent) {
+      try {
+        const payload = validRecords.map((rec) => ({
+          name: rec.name.trim(),
+          email: rec.email.trim().toLowerCase(),
+          registerNumber: rec.identifier.trim(),
+          department: rec.department || 'Computer Science & Engineering',
+          password: defaultPassword,
+        }));
+
+        const response = await bulkImportStudentsApi(payload);
+        const resultData = response.data || (response as any);
+        const count = resultData.importedCount ?? (resultData.imported?.length || 0);
+
+        // If classes were selected, enroll newly imported students
+        if (selectedClassIds.length > 0 && Array.isArray(resultData.imported) && resultData.imported.length > 0) {
+          const newStudentIds = resultData.imported.map((s: any) => s.id);
+          for (const classId of selectedClassIds) {
+            const cls = classes.find((c) => c.id === classId);
+            if (cls) {
+              const updatedStudentIds = Array.from(new Set([...(cls.studentIds || []), ...newStudentIds]));
+              await saveClassToFirestore({ ...cls, studentIds: updatedStudentIds });
+            }
+          }
+        }
+
+        // Authoritatively refresh student list from database so UI reflects real DB state
+        await refreshStudentsFromDatabase();
+
+        setIsImporting(false);
+        setPastedText('');
+        setParsedRecords([]);
+        setSelectedClassIds([]);
+        setFileName(null);
+        setErrorMsg(null);
+        setImportProgress({ current: 0, total: 0 });
+        onSuccess(count);
+        onClose();
+        return;
+      } catch (err: any) {
+        console.error('Bulk import students error:', err);
+        setErrorMsg(err.message || 'Failed to complete student import in database.');
+        setIsImporting(false);
+        return;
+      }
+    }
+
+    // Faculty import branch
+    let importedCount = 0;
     for (let i = 0; i < validRecords.length; i++) {
       const rec = validRecords[i];
       try {
         const userData: Partial<User> = {
           name: rec.name.trim(),
           email: rec.email.trim().toLowerCase(),
-          role: isStudent ? 'CANDIDATE' : 'FACULTY',
+          role: 'FACULTY',
           department: rec.department || 'Computer Science & Engineering',
           password: defaultPassword,
           classIds: selectedClassIds,
           status: 'ACTIVE',
+          employeeId: rec.identifier,
         };
-
-        if (isStudent) {
-          userData.registerNumber = rec.identifier;
-          userData.registerNo = rec.identifier;
-          (userData as any).register_number = rec.identifier;
-        } else {
-          userData.employeeId = rec.identifier;
-        }
 
         await onAddUser(userData);
         importedCount++;

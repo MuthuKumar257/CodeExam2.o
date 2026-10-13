@@ -504,7 +504,8 @@ export async function fetchModularStudents(): Promise<void> {
   if (isAssessmentActive() || isFetchingUsers) return;
   isFetchingUsers = true;
   try {
-    const res = await fetch('/api/students?limit=100');
+    const apiBase = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+    const res = await fetch(`${apiBase}/api/students?limit=1000`);
     if (!res.ok) {
       console.warn('[Modular Fetch Error]: /api/students returned status', res.status);
       return;
@@ -523,6 +524,13 @@ export async function fetchModularStudents(): Promise<void> {
     isFetchingUsers = false;
   }
 }
+
+export async function refreshStudentsFromDatabase(): Promise<User[]> {
+  isFetchingUsers = false;
+  await fetchModularStudents();
+  return localUsers.filter(isStudentUser);
+}
+
 
 export async function fetchModularFaculty(): Promise<void> {
   if (isAssessmentActive()) return;

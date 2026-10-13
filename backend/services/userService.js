@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs';
-import { memoryStore, supabase, isSupabaseConfigured } from './supabaseService.js';
+import { memoryStore, supabase, isSupabaseConfigured, savePersistentStore } from './supabaseService.js';
 import { logger } from '../utils/logger.js';
 
 // Concurrency lock to prevent race conditions during simultaneous user creation
@@ -14,6 +14,50 @@ export class UserService {
   static normalizeRegisterNumber(val) {
     if (val === undefined || val === null) return '';
     return String(val).trim();
+  }
+
+  /**
+   * Find user by registration number.
+   */
+  static async findUserByRegisterNumber(regNumber) {
+    const normalized = this.normalizeRegisterNumber(regNumber);
+    if (!normalized) return null;
+
+    let user = memoryStore.users.find((u) => {
+      const raw = u.register_number ?? u.registerNumber ?? u.registerNo ?? u.rollNumber;
+      return this.normalizeRegisterNumber(raw).toUpperCase() === normalized.toUpperCase();
+    });
+
+    if (!user && isSupabaseConfigured && supabase) {
+      try {
+        const { data } = await supabase
+          .from('users')
+          .select('*')
+          .or(`register_number.ilike.${normalized},registerNumber.ilike.${normalized}`)
+          .limit(1)
+          .maybeSingle();
+
+        if (data) {
+          user = data.data || data;
+          memoryStore.users.push(user);
+        }
+      } catch (err) {
+        try {
+          const { data: pData } = await supabase
+            .from('profiles')
+            .select('*')
+            .or(`register_number.ilike.${normalized},registerNumber.ilike.${normalized}`)
+            .limit(1)
+            .maybeSingle();
+          if (pData) {
+            user = pData.data || pData;
+            memoryStore.users.push(user);
+          }
+        } catch {}
+      }
+    }
+
+    return user || null;
   }
 
   /**
@@ -197,10 +241,6 @@ export class UserService {
         throw error;
       }
 
-      const defaultPass = role === 'FACULTY' ? 'Faculty@123' : role === 'ADMIN' ? 'Admin@123' : 'Student@123';
-      const hashedPassword = await bcrypt.hash(password || defaultPass, 10);
-      const userId = `usr-${role.toLowerCase()}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-
       const rawReg = register_number !== undefined
         ? register_number
         : (registerNumber !== undefined
@@ -209,6 +249,20 @@ export class UserService {
                 ? registerNo
                 : (extraFields?.registerNumber !== undefined ? extraFields.registerNumber : extraFields?.registerNo)));
       const regStr = rawReg !== undefined && rawReg !== null ? String(rawReg).trim() : '';
+
+      if (regStr) {
+        const existingReg = await this.findUserByRegisterNumber(regStr);
+        if (existingReg) {
+          const error = new Error(`Register number ${regStr} is already assigned to ${existingReg.name || existingReg.email}.`);
+          error.statusCode = 409;
+          error.errorCode = 'REGISTER_NUMBER_ALREADY_EXISTS';
+          throw error;
+        }
+      }
+
+      const defaultPass = role === 'FACULTY' ? 'Faculty@123' : role === 'ADMIN' ? 'Admin@123' : 'Student@123';
+      const hashedPassword = await bcrypt.hash(password || defaultPass, 10);
+      const userId = `usr-${role.toLowerCase()}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
       const newUser = {
         ...extraFields,
@@ -231,11 +285,13 @@ export class UserService {
 
       if (isSupabaseConfigured && supabase) {
         try {
-          const { error: sbError } = await supabase.from('users').upsert(newUser);
+          const { error: sbError } = await supabase.from('users').upsert(newUser, { onConflict: 'email' });
           if (sbError) {
-            // Check for database unique constraint violation
-            if (sbError.code === '23505' || sbError.message?.includes('duplicate key') || sbError.message?.includes('unique constraint')) {
-              // Roll back memoryStore insertion
+            if (sbError.code === 'PGRST205') {
+              try {
+                await supabase.from('profiles').upsert(newUser, { onConflict: 'email' });
+              } catch {}
+            } else if (sbError.code === '23505' || sbError.message?.includes('duplicate key') || sbError.message?.includes('unique constraint')) {
               const idx = memoryStore.users.findIndex((u) => u.id === userId);
               if (idx !== -1) memoryStore.users.splice(idx, 1);
 
@@ -251,6 +307,8 @@ export class UserService {
         }
       }
 
+      savePersistentStore();
+
       const { password: _, ...safeUser } = newUser;
       return safeUser;
     } finally {
@@ -259,80 +317,190 @@ export class UserService {
   }
 
   /**
-   * Bulk import students with in-file and database duplicate detection.
+   * Bulk import students with in-file and database duplicate detection,
+   * safe batching, and permanent database persistence.
    */
   static async bulkImportStudents(studentsList = []) {
     if (!Array.isArray(studentsList) || studentsList.length === 0) {
       return {
+        success: true,
         imported: [],
-        duplicatesInFile: [],
+        importedCount: 0,
+        skippedCount: 0,
+        duplicatesInFile: 0,
+        duplicatesInFileList: [],
+        duplicatesInDatabase: 0,
         alreadyRegistered: [],
+        failuresCount: 0,
+        failures: [],
         totalProcessed: 0,
       };
     }
 
-    const seenInFile = new Set();
+    const seenEmailsInFile = new Set();
+    const seenRegsInFile = new Set();
     const duplicatesInFile = [];
+    const failures = [];
     const validCandidates = [];
     const alreadyRegistered = [];
     const imported = [];
 
-    // 1. Identify in-file duplicates
+    // 1. Identify in-file duplicates and validate required fields
     for (const item of studentsList) {
-      const email = this.normalizeEmail(item.email);
-      if (!email) continue;
+      if (!item || typeof item !== 'object') {
+        failures.push({ item, reason: 'Invalid record format' });
+        continue;
+      }
 
-      if (seenInFile.has(email)) {
-        duplicatesInFile.push({ email, name: item.name });
+      const email = this.normalizeEmail(item.email);
+      const name = (item.name || '').trim();
+      const rawReg = item.register_number ?? item.registerNumber ?? item.registerNo ?? item.rollNumber;
+      const reg = this.normalizeRegisterNumber(rawReg);
+
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        failures.push({ name: name || 'Unknown', email: item.email || '', reason: 'Invalid or missing email address' });
+        continue;
+      }
+
+      if (!name) {
+        failures.push({ name: '', email, reason: 'Name is required' });
+        continue;
+      }
+
+      const isEmailDupInFile = seenEmailsInFile.has(email);
+      const isRegDupInFile = reg ? seenRegsInFile.has(reg.toUpperCase()) : false;
+
+      if (isEmailDupInFile || isRegDupInFile) {
+        duplicatesInFile.push({
+          email,
+          name,
+          registerNumber: reg,
+          reason: isEmailDupInFile ? 'Duplicate email within file' : 'Duplicate register number within file',
+        });
       } else {
-        seenInFile.add(email);
-        validCandidates.push({ ...item, email, email_normalized: email });
+        seenEmailsInFile.add(email);
+        if (reg) seenRegsInFile.add(reg.toUpperCase());
+        validCandidates.push({
+          ...item,
+          name,
+          email,
+          email_normalized: email,
+          registerNumber: reg,
+          register_number: reg,
+          registerNo: reg,
+        });
       }
     }
 
-    // 2. Process valid candidates
+    // 2. Identify database duplicates
+    const candidatesToInsert = [];
     for (const candidate of validCandidates) {
-      const existing = await this.findUserByNormalizedEmail(candidate.email);
-      if (existing) {
-        alreadyRegistered.push({ email: candidate.email, name: candidate.name, existingId: existing.id });
-      } else {
-        try {
-          const rawReg = candidate.register_number ?? candidate.registerNumber ?? candidate.registerNo;
-          const regStr = rawReg !== undefined && rawReg !== null ? String(rawReg).trim() : '';
+      const existingEmail = await this.findUserByNormalizedEmail(candidate.email);
+      if (existingEmail) {
+        alreadyRegistered.push({
+          email: candidate.email,
+          name: candidate.name,
+          registerNumber: candidate.registerNumber,
+          existingId: existingEmail.id,
+          reason: 'Email already registered in database',
+        });
+        continue;
+      }
 
-          const created = await this.createUser({
-            name: candidate.name || 'Student',
+      if (candidate.registerNumber) {
+        const existingReg = await this.findUserByRegisterNumber(candidate.registerNumber);
+        if (existingReg) {
+          alreadyRegistered.push({
             email: candidate.email,
-            password: candidate.password,
-            role: 'STUDENT',
-            register_number: regStr,
-            department: candidate.department,
-            institution_id: candidate.institution_id || candidate.institutionId || 'inst-01',
-            extraFields: {
-              registerNumber: regStr,
-              registerNo: regStr,
-            },
+            name: candidate.name,
+            registerNumber: candidate.registerNumber,
+            existingId: existingReg.id,
+            reason: `Register number ${candidate.registerNumber} already registered in database`,
           });
-          imported.push(created);
-        } catch (err) {
-          if (err.errorCode === 'EMAIL_ALREADY_EXISTS') {
-            alreadyRegistered.push({ email: candidate.email, name: candidate.name });
-          } else {
-            logger.error(`[UserService] Error importing student ${candidate.email}:`, err);
-          }
+          continue;
         }
       }
+
+      candidatesToInsert.push(candidate);
+    }
+
+    // 3. Batch process valid candidates in safe chunks of 50
+    const BATCH_SIZE = 50;
+    const defaultPassword = 'Student@123';
+    const hashedPassword = await bcrypt.hash(defaultPassword, 10);
+
+    for (let i = 0; i < candidatesToInsert.length; i += BATCH_SIZE) {
+      const batch = candidatesToInsert.slice(i, i + BATCH_SIZE);
+      const preparedBatch = [];
+
+      for (const item of batch) {
+        const userId = `usr-student-${Date.now()}-${Math.floor(Math.random() * 100000)}-${preparedBatch.length}`;
+        const itemPassword = item.password ? await bcrypt.hash(item.password, 10) : hashedPassword;
+
+        const studentRecord = {
+          ...item,
+          id: userId,
+          name: item.name.trim(),
+          email: item.email,
+          email_normalized: item.email,
+          password: itemPassword,
+          role: 'STUDENT',
+          register_number: item.registerNumber || '',
+          registerNumber: item.registerNumber || '',
+          registerNo: item.registerNumber || '',
+          department: item.department || 'Computer Science & Engineering',
+          institution_id: item.institution_id || item.institutionId || 'inst-01',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+
+        preparedBatch.push(studentRecord);
+        memoryStore.users.push(studentRecord);
+
+        const { password: _, ...safeStudent } = studentRecord;
+        imported.push(safeStudent);
+      }
+
+      // Persist batch to Supabase PostgreSQL safely
+      if (isSupabaseConfigured && supabase && preparedBatch.length > 0) {
+        try {
+          const { error: upsertErr } = await supabase
+            .from('users')
+            .upsert(preparedBatch, { onConflict: 'email' });
+
+          if (upsertErr) {
+            if (upsertErr.code === 'PGRST205') {
+              try {
+                await supabase
+                  .from('profiles')
+                  .upsert(preparedBatch, { onConflict: 'email' });
+              } catch {}
+            } else {
+              logger.warn('[UserService] Supabase bulk upsert warning:', upsertErr.message);
+            }
+          }
+        } catch (sbErr) {
+          logger.warn('[UserService] Supabase bulk upsert error:', sbErr.message);
+        }
+      }
+    }
+
+    // Persist memoryStore state to disk
+    if (imported.length > 0) {
+      savePersistentStore(true);
     }
 
     return {
       success: true,
       imported,
       importedCount: imported.length,
-      skippedCount: duplicatesInFile.length + alreadyRegistered.length,
+      skippedCount: duplicatesInFile.length + alreadyRegistered.length + failures.length,
       duplicatesInFile: duplicatesInFile.length,
       duplicatesInFileList: duplicatesInFile,
       duplicatesInDatabase: alreadyRegistered.length,
       alreadyRegistered,
+      failuresCount: failures.length,
+      failures,
       totalProcessed: studentsList.length,
     };
   }
@@ -346,7 +514,12 @@ export class UserService {
 
     let users = memoryStore.users;
     if (role) {
-      users = users.filter((u) => String(u.role).toUpperCase() === String(role).toUpperCase());
+      const rUpper = String(role).toUpperCase();
+      if (rUpper === 'STUDENT' || rUpper === 'CANDIDATE') {
+        users = users.filter((u) => ['STUDENT', 'CANDIDATE'].includes(String(u.role).toUpperCase()));
+      } else {
+        users = users.filter((u) => String(u.role).toUpperCase() === rUpper);
+      }
     }
     if (department) {
       users = users.filter((u) => u.department === department);
@@ -369,14 +542,40 @@ export class UserService {
     if (isSupabaseConfigured && supabase) {
       try {
         let query = supabase.from('users').select('*', { count: 'exact' });
-        if (role) query = query.eq('role', role.toUpperCase());
+        if (role) {
+          const rUpper = String(role).toUpperCase();
+          if (rUpper === 'STUDENT' || rUpper === 'CANDIDATE') {
+            query = query.in('role', ['STUDENT', 'CANDIDATE', 'student', 'candidate']);
+          } else {
+            query = query.eq('role', rUpper);
+          }
+        }
         if (department) query = query.eq('department', department);
 
         const from = (p - 1) * l;
         const to = from + l - 1;
-        const { data, count, error } = await query.range(from, to);
+        let { data, count, error } = await query.range(from, to);
 
-        if (!error && Array.isArray(data)) {
+        if (error && error.code === 'PGRST205') {
+          let profQuery = supabase.from('profiles').select('*', { count: 'exact' });
+          if (role) {
+            const rUpper = String(role).toUpperCase();
+            if (rUpper === 'STUDENT' || rUpper === 'CANDIDATE') {
+              profQuery = profQuery.in('role', ['STUDENT', 'CANDIDATE', 'student', 'candidate']);
+            } else {
+              profQuery = profQuery.eq('role', rUpper);
+            }
+          }
+          if (department) profQuery = profQuery.eq('department', department);
+          const profRes = await profQuery.range(from, to);
+          if (!profRes.error && Array.isArray(profRes.data)) {
+            data = profRes.data;
+            count = profRes.count;
+            error = null;
+          }
+        }
+
+        if (!error && Array.isArray(data) && data.length > 0) {
           const safeData = data.map(normalizeUser);
           const total = count ?? safeData.length;
           return {

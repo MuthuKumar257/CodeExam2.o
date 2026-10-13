@@ -1,14 +1,22 @@
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { logger } from '../utils/logger.js';
 import { isProduction, logDatabaseStartup } from './databaseSafety.js';
 
 dotenv.config();
 
-const supabaseUrl = process.env.SUPABASE_URL || '';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const STORE_FILE_PATH = path.resolve(__dirname, '../data/db_store.json');
+
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseKey =
-  process.env.SUPABASE_SECRET_KEY ||
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_SECRET_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_SECRET_KEY ||
   process.env.SUPABASE_PUBLISHABLE_KEY ||
   process.env.SUPABASE_ANON_KEY ||
   '';
@@ -268,17 +276,48 @@ export const defaultTestcases = [
   },
 ];
 
+function loadPersistentStore() {
+  try {
+    if (fs.existsSync(STORE_FILE_PATH)) {
+      const raw = fs.readFileSync(STORE_FILE_PATH, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        logger.info(`[Persistence] Loaded database state from ${STORE_FILE_PATH} (${parsed.users?.length || 0} users)`);
+        return parsed;
+      }
+    }
+  } catch (err) {
+    logger.warn('[Persistence] Error loading db_store.json:', err.message);
+  }
+  return null;
+}
+
+const loadedStore = loadPersistentStore();
+
+const initialAdminUsers = defaultUsers.filter((user) => String(user.role).toUpperCase() === 'ADMIN');
+const initialUsers = loadedStore?.users && Array.isArray(loadedStore.users) && loadedStore.users.length > 0
+  ? loadedStore.users
+  : (isProduction ? [] : initialAdminUsers);
+
+// Ensure default admin users exist in initialUsers if not present
+for (const admin of initialAdminUsers) {
+  if (!initialUsers.some((u) => u.email === admin.email || u.id === admin.id)) {
+    initialUsers.push(admin);
+  }
+}
+
 export const memoryStore = {
-  users: isProduction ? [] : defaultUsers.filter((user) => String(user.role).toUpperCase() === 'ADMIN'),
-  questions: isProduction ? [] : [...defaultQuestions],
-  testcases: isProduction ? [] : [...defaultTestcases],
-  tests: [],
-  classes: [],
-  departments: [],
-  institutions: [],
-  sessions: [],
-  submissions: [],
-  settings: {
+  users: initialUsers,
+  questions: loadedStore?.questions || (isProduction ? [] : [...defaultQuestions]),
+  testcases: loadedStore?.testcases || (isProduction ? [] : [...defaultTestcases]),
+  tests: loadedStore?.tests || [],
+  classes: loadedStore?.classes || [],
+  departments: loadedStore?.departments || [],
+  institutions: loadedStore?.institutions || [],
+  sessions: loadedStore?.sessions || [],
+  submissions: loadedStore?.submissions || [],
+  deletedUserIds: new Set(loadedStore?.deletedUserIds || []),
+  settings: loadedStore?.settings || {
     institution_name: 'CodeExam Technical University',
     allow_registrations: true,
     maintenance_mode: false,
@@ -288,3 +327,77 @@ export const memoryStore = {
     updated_at: new Date().toISOString(),
   },
 };
+
+let saveTimeout = null;
+export function savePersistentStore(immediate = false) {
+  const doSave = () => {
+    try {
+      const dataDir = path.dirname(STORE_FILE_PATH);
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+      const dataToSave = {
+        users: memoryStore.users,
+        questions: memoryStore.questions,
+        testcases: memoryStore.testcases,
+        tests: memoryStore.tests,
+        classes: memoryStore.classes,
+        departments: memoryStore.departments,
+        institutions: memoryStore.institutions,
+        sessions: memoryStore.sessions,
+        submissions: memoryStore.submissions,
+        deletedUserIds: Array.from(memoryStore.deletedUserIds || []),
+        settings: memoryStore.settings,
+        saved_at: new Date().toISOString(),
+      };
+      fs.writeFileSync(STORE_FILE_PATH, JSON.stringify(dataToSave, null, 2), 'utf-8');
+    } catch (err) {
+      logger.warn('[Persistence] Error writing db_store.json:', err.message);
+    }
+  };
+
+  if (immediate) {
+    if (saveTimeout) clearTimeout(saveTimeout);
+    saveTimeout = null;
+    doSave();
+  } else {
+    if (!saveTimeout) {
+      saveTimeout = setTimeout(() => {
+        saveTimeout = null;
+        doSave();
+      }, 500);
+    }
+  }
+}
+
+export async function syncFromSupabaseOnStartup() {
+  if (!isSupabaseConfigured || !supabase) return;
+  try {
+    let { data, error } = await supabase.from('users').select('*');
+    if (error && error.code === 'PGRST205') {
+      const pRes = await supabase.from('profiles').select('*');
+      if (!pRes.error && Array.isArray(pRes.data)) {
+        data = pRes.data;
+        error = null;
+      }
+    }
+
+    if (!error && Array.isArray(data) && data.length > 0) {
+      logger.info(`[StartupSync] Successfully synced ${data.length} users from Supabase PostgreSQL.`);
+      for (const sbUser of data) {
+        const unpacked = sbUser.data && typeof sbUser.data === 'object' ? { ...sbUser.data, ...sbUser } : sbUser;
+        const existingIdx = memoryStore.users.findIndex((u) => u.id === unpacked.id || (unpacked.email && u.email === unpacked.email));
+        if (existingIdx !== -1) {
+          memoryStore.users[existingIdx] = { ...memoryStore.users[existingIdx], ...unpacked };
+        } else {
+          memoryStore.users.push(unpacked);
+        }
+      }
+      savePersistentStore(true);
+    }
+  } catch (err) {
+    logger.warn('[StartupSync] Supabase initial sync skipped:', err.message);
+  }
+}
+
+syncFromSupabaseOnStartup().catch(() => {});
