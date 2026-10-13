@@ -18,10 +18,10 @@ export const defaultInstitutions = [
   { id: 'inst-01', name: 'CodeExam Institute of Technology', code: 'CEIT', location: 'Coimbatore, Tamil Nadu', domain: 'codeexam.edu', established_year: 1997, created_at: new Date().toISOString() },
 ];
 
-// Initialize in memoryStore if not present
-if (!memoryStore.classes) memoryStore.classes = [...defaultClasses];
-if (!memoryStore.departments) memoryStore.departments = [...defaultDepartments];
-if (!memoryStore.institutions) memoryStore.institutions = [...defaultInstitutions];
+// Initialize in memoryStore if not present or empty
+if (!memoryStore.classes || memoryStore.classes.length === 0) memoryStore.classes = [...defaultClasses];
+if (!memoryStore.departments || memoryStore.departments.length === 0) memoryStore.departments = [...defaultDepartments];
+if (!memoryStore.institutions || memoryStore.institutions.length === 0) memoryStore.institutions = [...defaultInstitutions];
 if (!memoryStore.deletedClassIds) memoryStore.deletedClassIds = new Set();
 if (!memoryStore.deletedDepartmentIds) memoryStore.deletedDepartmentIds = new Set();
 if (!memoryStore.deletedInstitutionIds) memoryStore.deletedInstitutionIds = new Set();

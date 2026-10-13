@@ -240,7 +240,7 @@ function saveStorage<T>(key: string, data: T): void {
 }
 
 // Initial Memory Store
-const localFallback = <T>(seed: T): T => (import.meta.env.PROD ? (Array.isArray(seed) ? [] : {}) as T : seed);
+const localFallback = <T>(seed: T): T => seed;
 let localUsers: User[] = loadStorage(STORAGE_KEYS.USERS, localFallback(DEMO_USERS));
 let localClasses: Classroom[] = loadStorage(STORAGE_KEYS.CLASSES, localFallback(INITIAL_CLASSES));
 let localDepartments: Department[] = loadStorage(STORAGE_KEYS.DEPARTMENTS, localFallback(INITIAL_DEPARTMENTS));
@@ -513,11 +513,15 @@ export async function fetchModularStudents(): Promise<void> {
     }
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
-      const serverStudents = json.data.map(normalizeUserFields);
-      const nonStudents = localUsers.filter((u) => !isStudentUser(u));
-      localUsers = deduplicateById([...nonStudents, ...serverStudents]);
-      saveStorage(STORAGE_KEYS.USERS, localUsers);
-      notify(listeners.users, localUsers);
+      if (json.data.length > 0) {
+        const serverStudents = json.data.map(normalizeUserFields);
+        const nonStudents = localUsers.filter((u) => !isStudentUser(u));
+        localUsers = deduplicateById([...nonStudents, ...serverStudents]);
+        saveStorage(STORAGE_KEYS.USERS, localUsers);
+        notify(listeners.users, localUsers);
+      } else if (localUsers.some(isStudentUser)) {
+        console.warn('[Modular Fetch Warning]: /api/students returned 0 records; preserving existing local students cache.');
+      }
     }
   } catch (err) {
     console.warn('[Modular Fetch Exception]: /api/students failed', err);
@@ -539,11 +543,15 @@ export async function fetchModularFaculty(): Promise<void> {
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
-      const serverFaculty = json.data.map(normalizeUserFields);
-      const nonFaculty = localUsers.filter((u) => isStudentUser(u) || String(u.role).toUpperCase() === 'ADMIN');
-      localUsers = deduplicateById([...nonFaculty, ...serverFaculty]);
-      saveStorage(STORAGE_KEYS.USERS, localUsers);
-      notify(listeners.users, localUsers);
+      if (json.data.length > 0) {
+        const serverFaculty = json.data.map(normalizeUserFields);
+        const nonFaculty = localUsers.filter((u) => isStudentUser(u) || String(u.role).toUpperCase() === 'ADMIN');
+        localUsers = deduplicateById([...nonFaculty, ...serverFaculty]);
+        saveStorage(STORAGE_KEYS.USERS, localUsers);
+        notify(listeners.users, localUsers);
+      } else if (localUsers.some((u) => String(u.role).toUpperCase() === 'FACULTY')) {
+        console.warn('[Modular Fetch Warning]: /api/faculty returned 0 records; preserving existing local faculty cache.');
+      }
     }
   } catch (err) {
     console.warn('[Modular Fetch Exception]: /api/faculty failed', err);
@@ -558,9 +566,13 @@ export async function fetchModularClasses(): Promise<void> {
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
-      localClasses = deduplicateById(json.data);
-      saveStorage(STORAGE_KEYS.CLASSES, localClasses);
-      notify(listeners.classes, localClasses);
+      if (json.data.length > 0) {
+        localClasses = deduplicateById(json.data);
+        saveStorage(STORAGE_KEYS.CLASSES, localClasses);
+        notify(listeners.classes, localClasses);
+      } else if (localClasses.length > 0) {
+        console.warn('[Modular Fetch Warning]: /api/classes returned 0 records; preserving existing local classes cache.');
+      }
     }
   } catch (err) {
     console.warn('[Modular Fetch Exception]: /api/classes failed', err);
@@ -577,9 +589,13 @@ export async function fetchModularDepartments(): Promise<void> {
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
-      localDepartments = deduplicateById(json.data);
-      saveStorage(STORAGE_KEYS.DEPARTMENTS, localDepartments);
-      notify(listeners.departments, localDepartments);
+      if (json.data.length > 0) {
+        localDepartments = deduplicateById(json.data);
+        saveStorage(STORAGE_KEYS.DEPARTMENTS, localDepartments);
+        notify(listeners.departments, localDepartments);
+      } else if (localDepartments.length > 0) {
+        console.warn('[Modular Fetch Warning]: /api/departments returned 0 records; preserving existing local departments cache.');
+      }
     }
   } catch (err) {
     console.warn('[Modular Fetch Exception]: /api/departments failed', err);
@@ -596,9 +612,13 @@ export async function fetchModularInstitutions(): Promise<void> {
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
-      localInstitutions = deduplicateById(json.data);
-      saveStorage(STORAGE_KEYS.INSTITUTIONS, localInstitutions);
-      notify(listeners.institutions, localInstitutions);
+      if (json.data.length > 0) {
+        localInstitutions = deduplicateById(json.data);
+        saveStorage(STORAGE_KEYS.INSTITUTIONS, localInstitutions);
+        notify(listeners.institutions, localInstitutions);
+      } else if (localInstitutions.length > 0) {
+        console.warn('[Modular Fetch Warning]: /api/institutions returned 0 records; preserving existing local institutions cache.');
+      }
     }
   } catch (err) {
     console.warn('[Modular Fetch Exception]: /api/institutions failed', err);
@@ -615,11 +635,16 @@ export async function fetchModularAssessments(): Promise<void> {
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
-      localAssessments = deduplicateById(
-        json.data.filter((a: any) => !a.is_deleted && a.status !== 'DELETED' && !LEGACY_DEMO_ASSESSMENT_IDS.has(a.id))
+      const validServerAssessments = json.data.filter(
+        (a: any) => !a.is_deleted && a.status !== 'DELETED' && !LEGACY_DEMO_ASSESSMENT_IDS.has(a.id)
       );
-      saveStorage(STORAGE_KEYS.ASSESSMENTS, localAssessments);
-      notify(listeners.assessments, localAssessments);
+      if (validServerAssessments.length > 0) {
+        localAssessments = deduplicateById(validServerAssessments);
+        saveStorage(STORAGE_KEYS.ASSESSMENTS, localAssessments);
+        notify(listeners.assessments, localAssessments);
+      } else if (localAssessments.length > 0) {
+        console.warn('[Modular Fetch Warning]: /api/tests returned 0 records; preserving existing local assessments cache.');
+      }
     }
   } catch (err) {
     console.warn('[Modular Fetch Exception]: /api/tests failed', err);
@@ -636,9 +661,13 @@ export async function fetchModularQuestions(): Promise<void> {
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
-      localQuestions = deduplicateById(json.data);
-      saveStorage(STORAGE_KEYS.QUESTIONS, localQuestions);
-      notify(listeners.questions, localQuestions);
+      if (json.data.length > 0) {
+        localQuestions = deduplicateById(json.data);
+        saveStorage(STORAGE_KEYS.QUESTIONS, localQuestions);
+        notify(listeners.questions, localQuestions);
+      } else if (localQuestions.length > 0) {
+        console.warn('[Modular Fetch Warning]: /api/questions returned 0 records; preserving existing local questions cache.');
+      }
     }
   } catch (err) {
     console.warn('[Modular Fetch Exception]: /api/questions failed', err);

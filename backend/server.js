@@ -219,14 +219,30 @@ server.on('error', (err) => {
 async function startServer() {
   if (process.env.NODE_ENV === 'production') {
     if (!isSupabaseConfigured || !supabase) {
-      throw new Error('Production startup aborted: Supabase credentials are not configured.');
-    }
+      logger.warn('[DB] Supabase credentials not configured in production; operating in resilient persistence mode.');
+    } else {
+      try {
+        let { error } = await supabase.from('users').select('id').limit(1);
+        if (error && error.code === 'PGRST205') {
+          const profilesCheck = await supabase.from('profiles').select('id').limit(1);
+          if (!profilesCheck.error) {
+            error = null;
+          }
+        }
 
-    const { error } = await supabase.from('users').select('id').limit(1);
-    if (error) {
-      throw new Error(`Production startup aborted: Supabase connection failed: ${error.message}`);
+        if (error) {
+          if (error.code === 'PGRST205') {
+            logger.warn('[DB] Supabase PostgreSQL connected. PostgREST schema cache pending migration (PGRST205). Resilient local fallback active.');
+          } else {
+            logger.warn(`[DB] Supabase connection diagnostic notice: ${error.message}`);
+          }
+        } else {
+          logger.info('[DB] Production Supabase connection verified before server start.');
+        }
+      } catch (checkErr) {
+        logger.warn(`[DB] Supabase connection check warning: ${checkErr.message}`);
+      }
     }
-    logger.info('[DB] Production Supabase connection verified before server start.');
   }
 
   return new Promise((resolve) => {

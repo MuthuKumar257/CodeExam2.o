@@ -276,6 +276,55 @@ export const defaultTestcases = [
   },
 ];
 
+export const defaultClasses = [
+  { id: 'cls-01', name: 'CSE - 3rd Year Section A', code: 'CSE-3A', department: 'Computer Science and Engineering', semester: 6, academic_year: '2025-2026', student_count: 65, created_at: new Date().toISOString() },
+  { id: 'cls-02', name: 'CSE - 3rd Year Section B', code: 'CSE-3B', department: 'Computer Science and Engineering', semester: 6, academic_year: '2025-2026', student_count: 62, created_at: new Date().toISOString() },
+  { id: 'cls-03', name: 'IT - Final Year Section A', code: 'IT-4A', department: 'Information Technology', semester: 8, academic_year: '2025-2026', student_count: 58, created_at: new Date().toISOString() },
+];
+
+export const defaultDepartments = [
+  { id: 'dept-01', name: 'Computer Science and Engineering', code: 'CSE', head_of_department: 'Dr. Alan Turing', faculty_count: 24, student_count: 480, created_at: new Date().toISOString() },
+  { id: 'dept-02', name: 'Information Technology', code: 'IT', head_of_department: 'Dr. Grace Hopper', faculty_count: 18, student_count: 360, created_at: new Date().toISOString() },
+  { id: 'dept-03', name: 'Artificial Intelligence & Data Science', code: 'AIDS', head_of_department: 'Dr. John McCarthy', faculty_count: 16, student_count: 240, created_at: new Date().toISOString() },
+];
+
+export const defaultInstitutions = [
+  { id: 'inst-01', name: 'CodeExam Institute of Technology', code: 'CEIT', location: 'Coimbatore, Tamil Nadu', domain: 'codeexam.edu', established_year: 1997, created_at: new Date().toISOString() },
+];
+
+export const defaultTests = [
+  {
+    id: 'test-01',
+    title: 'Data Structures & Algorithms Diagnostic',
+    description: 'Comprehensive coding evaluation on core DSA concepts including Arrays, Strings, and Two Pointers.',
+    faculty_id: 'usr-faculty-01',
+    duration_minutes: 90,
+    total_marks: 100,
+    status: 'ACTIVE',
+    start_time: new Date(Date.now() - 3600000).toISOString(),
+    end_time: new Date(Date.now() + 86400000 * 7).toISOString(),
+    questions: ['q-01', 'q-02', 'q-03', 'q-04'],
+    class_id: 'cls-01',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: 'test-02',
+    title: 'Problem Solving & Logic Assessment',
+    description: 'Timed assessment evaluating algorithm efficiency, edge cases, and algorithmic complexity.',
+    faculty_id: 'usr-faculty-01',
+    duration_minutes: 60,
+    total_marks: 50,
+    status: 'ACTIVE',
+    start_time: new Date(Date.now() - 1800000).toISOString(),
+    end_time: new Date(Date.now() + 86400000 * 5).toISOString(),
+    questions: ['q-01', 'q-02'],
+    class_id: 'cls-02',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+];
+
 function loadPersistentStore() {
   try {
     if (fs.existsSync(STORE_FILE_PATH)) {
@@ -294,26 +343,25 @@ function loadPersistentStore() {
 
 const loadedStore = loadPersistentStore();
 
-const initialAdminUsers = defaultUsers.filter((user) => String(user.role).toUpperCase() === 'ADMIN');
 const initialUsers = loadedStore?.users && Array.isArray(loadedStore.users) && loadedStore.users.length > 0
-  ? loadedStore.users
-  : (isProduction ? [] : initialAdminUsers);
+  ? [...loadedStore.users]
+  : [...defaultUsers];
 
-// Ensure default admin users exist in initialUsers if not present
-for (const admin of initialAdminUsers) {
-  if (!initialUsers.some((u) => u.email === admin.email || u.id === admin.id)) {
-    initialUsers.push(admin);
+// Ensure essential default users exist in initialUsers if not present
+for (const defUser of defaultUsers) {
+  if (!initialUsers.some((u) => u.email === defUser.email || u.id === defUser.id)) {
+    initialUsers.push(defUser);
   }
 }
 
 export const memoryStore = {
   users: initialUsers,
-  questions: loadedStore?.questions || (isProduction ? [] : [...defaultQuestions]),
-  testcases: loadedStore?.testcases || (isProduction ? [] : [...defaultTestcases]),
-  tests: loadedStore?.tests || [],
-  classes: loadedStore?.classes || [],
-  departments: loadedStore?.departments || [],
-  institutions: loadedStore?.institutions || [],
+  questions: loadedStore?.questions && loadedStore.questions.length > 0 ? loadedStore.questions : [...defaultQuestions],
+  testcases: loadedStore?.testcases && loadedStore.testcases.length > 0 ? loadedStore.testcases : [...defaultTestcases],
+  tests: loadedStore?.tests && loadedStore.tests.length > 0 ? loadedStore.tests : [...defaultTests],
+  classes: loadedStore?.classes && loadedStore.classes.length > 0 ? loadedStore.classes : [...defaultClasses],
+  departments: loadedStore?.departments && loadedStore.departments.length > 0 ? loadedStore.departments : [...defaultDepartments],
+  institutions: loadedStore?.institutions && loadedStore.institutions.length > 0 ? loadedStore.institutions : [...defaultInstitutions],
   sessions: loadedStore?.sessions || [],
   submissions: loadedStore?.submissions || [],
   deletedUserIds: new Set(loadedStore?.deletedUserIds || []),
@@ -393,8 +441,45 @@ export async function syncFromSupabaseOnStartup() {
           memoryStore.users.push(unpacked);
         }
       }
-      savePersistentStore(true);
     }
+
+    // Sync assessments if present
+    try {
+      const aRes = await supabase.from('assessments').select('*');
+      if (!aRes.error && Array.isArray(aRes.data) && aRes.data.length > 0) {
+        logger.info(`[StartupSync] Synced ${aRes.data.length} assessments from Supabase.`);
+        memoryStore.tests = aRes.data;
+      }
+    } catch {}
+
+    // Sync classes if present
+    try {
+      const cRes = await supabase.from('classes').select('*');
+      if (!cRes.error && Array.isArray(cRes.data) && cRes.data.length > 0) {
+        logger.info(`[StartupSync] Synced ${cRes.data.length} classes from Supabase.`);
+        memoryStore.classes = cRes.data;
+      }
+    } catch {}
+
+    // Sync departments if present
+    try {
+      const dRes = await supabase.from('departments').select('*');
+      if (!dRes.error && Array.isArray(dRes.data) && dRes.data.length > 0) {
+        logger.info(`[StartupSync] Synced ${dRes.data.length} departments from Supabase.`);
+        memoryStore.departments = dRes.data;
+      }
+    } catch {}
+
+    // Sync questions if present
+    try {
+      const qRes = await supabase.from('questions').select('*');
+      if (!qRes.error && Array.isArray(qRes.data) && qRes.data.length > 0) {
+        logger.info(`[StartupSync] Synced ${qRes.data.length} questions from Supabase.`);
+        memoryStore.questions = qRes.data;
+      }
+    } catch {}
+
+    savePersistentStore(true);
   } catch (err) {
     logger.warn('[StartupSync] Supabase initial sync skipped:', err.message);
   }

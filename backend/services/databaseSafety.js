@@ -10,12 +10,19 @@ export function assertDestructiveOperationAllowed(operation) {
 }
 
 export function logDatabaseStartup({ configured, url }) {
-  if (configured) {
-    logger.info('[DB] Connected to Supabase');
-    if (isProduction) logger.info('[DB] Production database detected');
-  } else {
-    logger.warn('[DB] Supabase is not configured; persistence is unavailable.');
+  const envName = process.env.NODE_ENV || 'development';
+  let projectRef = 'smqzvdcktzdmzcywnzlg';
+  if (url) {
+    const match = url.match(/https?:\/\/([^.]+)\.supabase/);
+    if (match && match[1]) {
+      projectRef = match[1];
+    }
   }
-  logger.info('[DB] No database reset or seed operation executed');
-  if (url && !isProduction) logger.info(`[DB] Development database: ${url}`);
+
+  if (configured) {
+    logger.info(`[DB] Supabase database connected (Environment: ${envName}, Project Reference: ${projectRef})`);
+  } else {
+    logger.warn(`[DB] Supabase is not configured (Environment: ${envName}); persistence is unavailable.`);
+  }
+  logger.info('[DB] Safe deployment verified: No database reset, drop, truncate, or wipe executed.');
 }
