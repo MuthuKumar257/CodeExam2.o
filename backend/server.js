@@ -121,9 +121,17 @@ app.get('/api/health/database', async (req, res, next) => {
 });
 
 app.get(['/api/server-time', '/server-time'], (_req, res) => {
-  return sendSuccess(res, {
-    server_time: new Date().toISOString(),
-    timestamp: Date.now(),
+  const now = new Date();
+  return res.status(200).json({
+    success: true,
+    serverTime: now.toISOString(),
+    server_time: now.toISOString(),
+    timestamp: now.getTime(),
+    data: {
+      serverTime: now.toISOString(),
+      server_time: now.toISOString(),
+      timestamp: now.getTime(),
+    },
   });
 });
 

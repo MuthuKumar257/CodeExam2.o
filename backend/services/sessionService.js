@@ -52,7 +52,7 @@ export class SessionService {
     return memoryStore.sessions.filter((s) => s.status === 'ACTIVE');
   }
 
-  static async startOrRestoreSession(testId, studentId, studentName = 'Student') {
+  static async startOrRestoreSession(testId, studentId, studentName = 'Student', currentTime = null) {
     let test = memoryStore.tests.find((t) => t.id === testId && !t.is_deleted);
     if (!test && isSupabaseConfigured && supabase) {
       try {
@@ -66,29 +66,9 @@ export class SessionService {
     if (!test) {
       throw new Error('Test not found or has been deleted.');
     }
-    const now = this.getServerTime();
-    const scheduledStart = test.start_time ? new Date(test.start_time).getTime() : null;
-    const scheduledEnd = test.end_time ? new Date(test.end_time).getTime() : null;
-    if (['DRAFT', 'CLOSED', 'DELETED'].includes(String(test.status || '').toUpperCase())) {
-      const error = new Error('Assessment is not available.');
-      error.statusCode = 409;
-      error.errorCode = 'ASSESSMENT_NOT_AVAILABLE';
-      throw error;
-    }
-    if (scheduledStart && now.getTime() < scheduledStart) {
-      const error = new Error('Assessment has not started yet.');
-      error.statusCode = 409;
-      error.errorCode = 'ASSESSMENT_NOT_STARTED';
-      throw error;
-    }
-    if (scheduledEnd && now.getTime() >= scheduledEnd) {
-      const error = new Error('Assessment availability has ended.');
-      error.statusCode = 409;
-      error.errorCode = 'ASSESSMENT_CLOSED';
-      throw error;
-    }
+    const now = currentTime ? new Date(currentTime) : this.getServerTime();
 
-    // 1. Session Locking: check for existing active session for this student + test
+    // 1. Session Locking / Resuming: check for existing active session for this student + test FIRST
     let existingActive = memoryStore.sessions.find(
       (s) => s.test_id === testId && s.student_id === studentId && (s.status === 'ACTIVE' || s.attempt_status === 'IN_PROGRESS')
     );
@@ -110,7 +90,15 @@ export class SessionService {
     }
 
     if (existingActive) {
-      // Reconnection: restore existing active session
+      // Reconnection: check if session duration has expired
+      if (existingActive.end_time && now.getTime() >= new Date(existingActive.end_time).getTime()) {
+        await this.autoSubmitSession(existingActive.id, now);
+        const error = new Error('Assessment session duration has expired.');
+        error.statusCode = 409;
+        error.errorCode = 'ATTEMPT_EXPIRED';
+        throw error;
+      }
+
       existingActive.connection_status = 'connected';
       existingActive.last_heartbeat = now.toISOString();
       existingActive.last_seen_at = now.toISOString();
@@ -130,11 +118,57 @@ export class SessionService {
       };
     }
 
-    // 2. Compute absolute server end time based on test duration
+    // 2. Authoritative scheduling validation for NEW attempts
+    const scheduledStart = test.start_time || test.startTime ? new Date(test.start_time || test.startTime).getTime() : null;
+    const scheduledEnd = test.end_time || test.endTime ? new Date(test.end_time || test.endTime).getTime() : null;
+
+    if (['DRAFT', 'CLOSED', 'DELETED'].includes(String(test.status || '').toUpperCase())) {
+      const error = new Error('Assessment is not available.');
+      error.statusCode = 409;
+      error.errorCode = 'ASSESSMENT_NOT_AVAILABLE';
+      throw error;
+    }
+    if (scheduledStart && now.getTime() < scheduledStart) {
+      const error = new Error('Assessment has not started yet. Please wait until scheduled start time.');
+      error.statusCode = 409;
+      error.errorCode = 'ASSESSMENT_NOT_STARTED';
+      throw error;
+    }
+    if (scheduledEnd && now.getTime() >= scheduledEnd) {
+      const error = new Error('Assessment availability has ended.');
+      error.statusCode = 409;
+      error.errorCode = 'ASSESSMENT_CLOSED';
+      throw error;
+    }
+
+    // 3. Compute absolute server end time based on test duration
     const durationMinutes = Number(test.duration_minutes || test.durationMinutes || test.duration || 60);
     const startedAt = now.toISOString();
     const endTime = new Date(now.getTime() + durationMinutes * 60000).toISOString();
     const sessionId = `sess-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+    const isEqualMarks = Boolean(test.is_equal_marks ?? test.isEqualMarks ?? true);
+    const testQuestionIds = Array.isArray(test.question_ids) ? test.question_ids : [];
+    let calculatedTotalMarks = Number(test.total_marks || 100);
+    if (isEqualMarks) {
+      const marksPerQ = Number(test.marks_per_question ?? test.marksPerQuestion ?? 20);
+      if (testQuestionIds.length > 0) {
+        calculatedTotalMarks = testQuestionIds.length * marksPerQ;
+      }
+    } else {
+      let sumTcMax = 0;
+      for (const qId of testQuestionIds) {
+        const qObj = memoryStore.questions.find((x) => x.id === qId);
+        const qTcs = memoryStore.testcases.filter((tc) => tc.question_id === qId);
+        const hasCustom = qTcs.some((tc) => tc.marks !== undefined || tc.points !== undefined);
+        if (hasCustom && qTcs.length > 0) {
+          sumTcMax += qTcs.reduce((acc, tc) => acc + Number(tc.marks ?? tc.points ?? 0), 0);
+        } else if (qObj) {
+          sumTcMax += Number(qObj.marks || qObj.points || 20);
+        }
+      }
+      if (sumTcMax > 0) calculatedTotalMarks = sumTcMax;
+    }
 
     const newSession = {
       id: sessionId,
@@ -153,7 +187,8 @@ export class SessionService {
       last_heartbeat: startedAt,
       last_seen_at: startedAt,
       score: 0,
-      total_marks: test.total_marks || 100,
+      total_marks: calculatedTotalMarks,
+      percentage: 0,
       warnings_count: 0,
       created_at: startedAt,
       updated_at: startedAt,
@@ -260,29 +295,61 @@ export class SessionService {
       return this.autoSubmitSession(sessionId, nowDate);
     }
     if (session.attempt_status && session.attempt_status !== 'IN_PROGRESS') return session;
-    if (submission.score !== undefined) {
-      session.score = submission.score;
-    } else {
-      const studentTestSubs = memoryStore.submissions.filter(
-        (s) => s.student_id === session.student_id && s.test_id === session.test_id
-      );
-      if (studentTestSubs.length > 0) {
-        const questionScoreMap = new Map();
-        for (const sub of studentTestSubs) {
-          questionScoreMap.set(sub.question_id, Number(sub.score || 0));
+
+    const test = memoryStore.tests.find((t) => t.id === session.test_id);
+    const studentTestSubs = memoryStore.submissions.filter(
+      (s) => s.student_id === session.student_id && s.test_id === session.test_id
+    );
+
+    let totalScore = 0;
+    if (studentTestSubs.length > 0) {
+      const questionScoreMap = new Map();
+      for (const sub of studentTestSubs) {
+        const existing = questionScoreMap.get(sub.question_id) || 0;
+        questionScoreMap.set(sub.question_id, Math.max(existing, Number(sub.score || 0)));
+      }
+      for (const sScore of questionScoreMap.values()) {
+        totalScore += sScore;
+      }
+    } else if (submission.score !== undefined && submission.score !== null) {
+      totalScore = Number(submission.score);
+    }
+    session.score = Math.round((totalScore + Number.EPSILON) * 100) / 100;
+
+    let totalMarks = Number(session.total_marks || test?.total_marks || 100);
+    if (test) {
+      const isEqualMarks = Boolean(test.is_equal_marks ?? test.isEqualMarks ?? true);
+      const testQuestionIds = Array.isArray(test.question_ids) ? test.question_ids : [];
+      if (isEqualMarks) {
+        const marksPerQ = Number(test.marks_per_question ?? test.marksPerQuestion ?? 20);
+        if (testQuestionIds.length > 0) {
+          totalMarks = testQuestionIds.length * marksPerQ;
         }
-        let total = 0;
-        for (const sScore of questionScoreMap.values()) {
-          total += sScore;
+      } else {
+        let sumTcMax = 0;
+        for (const qId of testQuestionIds) {
+          const qObj = memoryStore.questions.find((x) => x.id === qId);
+          const qTcs = memoryStore.testcases.filter((tc) => tc.question_id === qId);
+          const hasCustom = qTcs.some((tc) => tc.marks !== undefined || tc.points !== undefined);
+          if (hasCustom && qTcs.length > 0) {
+            sumTcMax += qTcs.reduce((acc, tc) => acc + Number(tc.marks ?? tc.points ?? 0), 0);
+          } else if (qObj) {
+            sumTcMax += Number(qObj.marks || qObj.points || 20);
+          }
         }
-        session.score = Math.round((total + Number.EPSILON) * 100) / 100;
+        if (sumTcMax > 0) totalMarks = sumTcMax;
       }
     }
-    if (submission.totalPoints !== undefined) session.total_marks = submission.totalPoints;
+    session.total_marks = Math.round((totalMarks + Number.EPSILON) * 100) / 100;
+    session.percentage = session.total_marks > 0
+      ? Math.round(((session.score / session.total_marks) * 100) * 100) / 100
+      : 0;
+
     if (submission.state !== undefined) session.latest_submission = submission.state;
     session.status = 'SUBMITTED';
     session.attempt_status = 'SUBMITTED';
     session.submitted_at = now;
+    session.completed_at = now;
     session.updated_at = now;
 
     if (isSupabaseConfigured && supabase) {
@@ -290,16 +357,18 @@ export class SessionService {
         await supabase.from('sessions').update({
           score: session.score,
           total_marks: session.total_marks,
+          percentage: session.percentage,
           status: 'SUBMITTED',
           submitted_at: now,
-          updated_at: now
+          completed_at: now,
+          updated_at: now,
         }).eq('id', sessionId);
       } catch (err) {
         logger.warn('Supabase submit session fallback:', err.message);
       }
     }
 
-    logger.info(`Session ${sessionId} successfully SUBMITTED.`);
+    logger.info(`Session ${sessionId} successfully SUBMITTED. Score: ${session.score}/${session.total_marks} (${session.percentage}%)`);
     return session;
   }
 
@@ -314,25 +383,56 @@ export class SessionService {
       throw error;
     }
     const now = currentTime.toISOString();
-    if (submission.score !== undefined) {
-      session.score = submission.score;
-    } else {
-      const studentTestSubs = memoryStore.submissions.filter(
-        (s) => s.student_id === session.student_id && s.test_id === session.test_id
-      );
-      if (studentTestSubs.length > 0) {
-        const questionScoreMap = new Map();
-        for (const sub of studentTestSubs) {
-          questionScoreMap.set(sub.question_id, Number(sub.score || 0));
+
+    const test = memoryStore.tests.find((t) => t.id === session.test_id);
+    const studentTestSubs = memoryStore.submissions.filter(
+      (s) => s.student_id === session.student_id && s.test_id === session.test_id
+    );
+
+    let totalScore = 0;
+    if (studentTestSubs.length > 0) {
+      const questionScoreMap = new Map();
+      for (const sub of studentTestSubs) {
+        const existing = questionScoreMap.get(sub.question_id) || 0;
+        questionScoreMap.set(sub.question_id, Math.max(existing, Number(sub.score || 0)));
+      }
+      for (const sScore of questionScoreMap.values()) {
+        totalScore += sScore;
+      }
+    } else if (submission.score !== undefined && submission.score !== null) {
+      totalScore = Number(submission.score);
+    }
+    session.score = Math.round((totalScore + Number.EPSILON) * 100) / 100;
+
+    let totalMarks = Number(session.total_marks || test?.total_marks || 100);
+    if (test) {
+      const isEqualMarks = Boolean(test.is_equal_marks ?? test.isEqualMarks ?? true);
+      const testQuestionIds = Array.isArray(test.question_ids) ? test.question_ids : [];
+      if (isEqualMarks) {
+        const marksPerQ = Number(test.marks_per_question ?? test.marksPerQuestion ?? 20);
+        if (testQuestionIds.length > 0) {
+          totalMarks = testQuestionIds.length * marksPerQ;
         }
-        let total = 0;
-        for (const sScore of questionScoreMap.values()) {
-          total += sScore;
+      } else {
+        let sumTcMax = 0;
+        for (const qId of testQuestionIds) {
+          const qObj = memoryStore.questions.find((x) => x.id === qId);
+          const qTcs = memoryStore.testcases.filter((tc) => tc.question_id === qId);
+          const hasCustom = qTcs.some((tc) => tc.marks !== undefined || tc.points !== undefined);
+          if (hasCustom && qTcs.length > 0) {
+            sumTcMax += qTcs.reduce((acc, tc) => acc + Number(tc.marks ?? tc.points ?? 0), 0);
+          } else if (qObj) {
+            sumTcMax += Number(qObj.marks || qObj.points || 20);
+          }
         }
-        session.score = Math.round((total + Number.EPSILON) * 100) / 100;
+        if (sumTcMax > 0) totalMarks = sumTcMax;
       }
     }
-    if (submission.totalPoints !== undefined) session.total_marks = submission.totalPoints;
+    session.total_marks = Math.round((totalMarks + Number.EPSILON) * 100) / 100;
+    session.percentage = session.total_marks > 0
+      ? Math.round(((session.score / session.total_marks) * 100) * 100) / 100
+      : 0;
+
     if (submission.state !== undefined) session.latest_submission = submission.state;
     session.status = 'EXPIRED';
     session.attempt_status = 'AUTO_SUBMITTED';
@@ -345,6 +445,7 @@ export class SessionService {
         await supabase.from('sessions').update({
           score: session.score,
           total_marks: session.total_marks,
+          percentage: session.percentage,
           status: 'EXPIRED',
           submitted_at: session.submitted_at,
           completed_at: session.completed_at,

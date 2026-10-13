@@ -73,21 +73,36 @@ export class TestService {
 
   static async createTest(data, facultyId = 'usr-faculty-01', facultyName = 'Faculty Member') {
     const id = data.id || `test-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    const questionIds = Array.isArray(data.question_ids) ? data.question_ids : [];
+    const questionIds = Array.isArray(data.question_ids)
+      ? data.question_ids
+      : (Array.isArray(data.questions) ? data.questions.map((q) => typeof q === 'string' ? q : q.id) : []);
 
-    // Calculate total marks from assigned questions or fallback to total_marks
-    let totalMarks = Number(data.total_marks || 0);
-    if (totalMarks <= 0) {
+    const isEqualMarks = Boolean(data.is_equal_marks ?? data.isEqualMarks ?? true);
+    const marksPerQuestion = data.marks_per_question ?? data.marksPerQuestion ?? (isEqualMarks ? 20 : null);
+
+    // Calculate total marks based on isEqualMarks
+    let totalMarks = 0;
+    if (isEqualMarks && marksPerQuestion) {
+      totalMarks = (questionIds.length || 1) * Number(marksPerQuestion);
+    } else {
       for (const qId of questionIds) {
         const q = memoryStore.questions.find((x) => x.id === qId);
-        if (q) totalMarks += Number(q.marks || 0);
+        if (q) {
+          const tcs = memoryStore.testcases.filter((tc) => tc.question_id === qId);
+          const hasCustom = tcs.some((tc) => tc.marks !== undefined || tc.points !== undefined);
+          if (hasCustom && tcs.length > 0) {
+            totalMarks += tcs.reduce((acc, tc) => acc + Number(tc.marks ?? tc.points ?? 0), 0);
+          } else {
+            totalMarks += Number(q.marks || q.points || 20);
+          }
+        }
       }
     }
-    if (totalMarks <= 0) totalMarks = 100;
+    if (totalMarks <= 0) totalMarks = Number(data.total_marks || data.totalMarks || 100);
 
-    const durationMinutes = Number(data.duration_minutes || 60);
-    const startTime = data.start_time || new Date().toISOString();
-    const endTime = data.end_time || new Date(Date.now() + 7 * 86400000).toISOString();
+    const durationMinutes = Number(data.duration_minutes || data.durationMinutes || data.duration || 60);
+    const startTime = data.start_time || data.startTime || new Date().toISOString();
+    const endTime = data.end_time || data.endTime || new Date(Date.now() + 7 * 86400000).toISOString();
 
     const newTest = {
       id,
@@ -95,14 +110,23 @@ export class TestService {
       description: data.description || '',
       instructions: data.instructions || 'Read all instructions carefully before starting.',
       duration_minutes: durationMinutes,
+      durationMinutes,
       start_time: startTime,
+      startTime,
       end_time: endTime,
+      endTime,
+      is_equal_marks: isEqualMarks,
+      isEqualMarks,
+      marks_per_question: marksPerQuestion,
+      marksPerQuestion,
       total_marks: totalMarks,
+      totalMarks,
       passing_marks: Number(data.passing_marks || Math.round(totalMarks * 0.4)),
       faculty_id: facultyId,
       faculty_name: data.faculty_name || facultyName,
       status: data.status || 'ACTIVE',
       question_ids: questionIds,
+      questions: questionIds,
       allowed_languages: data.allowed_languages || ['javascript', 'python', 'cpp', 'java'],
       is_deleted: false,
       created_at: new Date().toISOString(),
@@ -126,10 +150,24 @@ export class TestService {
     const index = memoryStore.tests.findIndex((t) => t.id === id && !t.is_deleted);
     if (index === -1) return null;
 
+    const current = memoryStore.tests[index];
+    const startTime = data.start_time || data.startTime || current.start_time || current.startTime;
+    const endTime = data.end_time || data.endTime || current.end_time || current.endTime;
+    const isEqualMarks = Boolean(data.is_equal_marks ?? data.isEqualMarks ?? current.is_equal_marks ?? current.isEqualMarks ?? true);
+    const marksPerQuestion = data.marks_per_question ?? data.marksPerQuestion ?? current.marks_per_question ?? current.marksPerQuestion;
+
     const updated = {
-      ...memoryStore.tests[index],
+      ...current,
       ...data,
       id,
+      start_time: startTime,
+      startTime,
+      end_time: endTime,
+      endTime,
+      is_equal_marks: isEqualMarks,
+      isEqualMarks,
+      marks_per_question: marksPerQuestion,
+      marksPerQuestion,
       updated_at: new Date().toISOString(),
     };
     memoryStore.tests[index] = updated;

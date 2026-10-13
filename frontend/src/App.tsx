@@ -2379,6 +2379,23 @@ export default function App() {
       return;
     }
 
+    // Enforce scheduled time window strictly for new starts
+    const rawStartTime = rawAsm?.startTime || (rawAsm as any)?.start_time;
+    const rawEndTime = rawAsm?.endTime || (rawAsm as any)?.end_time;
+    const startMs = rawStartTime ? new Date(rawStartTime).getTime() : NaN;
+    const endMs = rawEndTime ? new Date(rawEndTime).getTime() : NaN;
+    const now = Date.now();
+
+    if (!activeSess && !restartPerm && !isNaN(startMs) && now < startMs) {
+      alert(`This assessment is scheduled to start at ${new Date(startMs).toLocaleString()}. Please wait until the start time.`);
+      return;
+    }
+
+    if (!activeSess && !restartPerm && !isNaN(endMs) && now >= endMs) {
+      alert('This assessment has already closed as the scheduled end time has passed.');
+      return;
+    }
+
     // If restart permission was used, mark all candidate identifiers consumed so it cannot be reused multiple times
     if (restartPerm && rawAsm?.restartPermissions) {
       const nowIso = new Date().toISOString();

@@ -52,3 +52,69 @@ export function evaluateOutput(actual, expected) {
   const normExpected = String(expected || '').trim().replace(/\r\n/g, '\n');
   return normActual === normExpected;
 }
+
+/**
+ * Calculate test-case-based question score (Equal Marks per Question is OFF).
+ * Question Score = Sum of marks for all passed test cases.
+ * Handles both individually configured test-case marks and question-level allocations.
+ */
+export function calculateTestCaseBasedScore({ testcases = [], testcaseResults = [], totalQuestionMarks = 20 } = {}) {
+  const cases = testcases.length > 0 ? testcases : testcaseResults;
+  if (!Array.isArray(cases) || cases.length === 0) {
+    return {
+      score: 0,
+      maxScore: Number(totalQuestionMarks) || 20,
+      testcaseScores: [],
+      passedCount: 0,
+      totalCount: 0,
+    };
+  }
+
+  const totalCount = cases.length;
+  const hasConfiguredMarks = cases.some(
+    (tc) => (tc.marks !== undefined && tc.marks !== null) || (tc.points !== undefined && tc.points !== null)
+  );
+
+  const defaultMarkPerTc = totalCount > 0 ? Number(totalQuestionMarks) / totalCount : 0;
+  let earnedScore = 0;
+  let maxScore = 0;
+  let passedCount = 0;
+  const testcaseScores = [];
+
+  for (let i = 0; i < totalCount; i++) {
+    const tc = cases[i];
+    const res = testcaseResults[i] || tc;
+    const isPassed = Boolean(res.passed);
+
+    const tcMarks = hasConfiguredMarks
+      ? Number(tc.marks ?? tc.points ?? 0)
+      : defaultMarkPerTc;
+
+    maxScore += tcMarks;
+
+    const awarded = isPassed ? tcMarks : 0;
+    if (isPassed) {
+      passedCount++;
+      earnedScore += awarded;
+    }
+
+    testcaseScores.push({
+      testcase_id: tc.id || tc.testcase_id,
+      index: i + 1,
+      passed: isPassed,
+      marks_awarded: Math.round((awarded + Number.EPSILON) * 100) / 100,
+      max_marks: Math.round((tcMarks + Number.EPSILON) * 100) / 100,
+    });
+  }
+
+  const roundedScore = Math.round((earnedScore + Number.EPSILON) * 100) / 100;
+  const roundedMax = Math.round((maxScore + Number.EPSILON) * 100) / 100;
+
+  return {
+    score: roundedScore,
+    maxScore: roundedMax,
+    testcaseScores,
+    passedCount,
+    totalCount,
+  };
+}

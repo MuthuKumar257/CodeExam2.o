@@ -2,7 +2,7 @@ import { memoryStore, supabase, isSupabaseConfigured } from './supabaseService.j
 import { QuestionService } from './questionService.js';
 import { executeCodeInSandbox } from './codeRunnerService.js';
 import { executeCodeBatchInSandbox, getLanguageConfig } from './codeRunnerService.js';
-import { calculateQuestionScore, calculateTestcaseScore, evaluateOutput } from './scoringService.js';
+import { calculateQuestionScore, calculateTestcaseScore, calculateTestCaseBasedScore, evaluateOutput } from './scoringService.js';
 import { logger } from '../utils/logger.js';
 import { randomUUID } from 'crypto';
 
@@ -62,10 +62,11 @@ export class SubmissionService {
 
     let questionMarks = Number(question.marks || question.points || 20);
     const test = testId ? memoryStore.tests.find((t) => t.id === testId) : null;
+    let isEqualMarks = true;
     if (test) {
-      const isEqual = test.is_equal_marks ?? test.isEqualMarks;
+      isEqualMarks = Boolean(test.is_equal_marks ?? test.isEqualMarks ?? true);
       const marksPerQ = test.marks_per_question ?? test.marksPerQuestion;
-      if (isEqual && marksPerQ) {
+      if (isEqualMarks && marksPerQ) {
         questionMarks = Number(marksPerQ);
       }
     }
@@ -76,6 +77,11 @@ export class SubmissionService {
     const batch = await executeCodeBatchInSandbox(language, code, testcases);
     const hasCompilationError = batch.results.some((result) => result.status === 'compilation_error');
 
+    const tcMarksConfigured = testcases.some(
+      (tc) => (tc.marks !== undefined && tc.marks !== null) || (tc.points !== undefined && tc.points !== null)
+    );
+    const defaultMarkPerTc = totalCount > 0 ? questionMarks / totalCount : 0;
+
     for (let i = 0; i < testcases.length; i++) {
       const tc = testcases[i];
       const runResult = batch.results[i];
@@ -84,6 +90,11 @@ export class SubmissionService {
       if (isPassed) {
         passedCount++;
       }
+
+      const tcWeight = (!isEqualMarks && tcMarksConfigured)
+        ? Number(tc.marks ?? tc.points ?? 0)
+        : defaultMarkPerTc;
+      const marksAwarded = isPassed ? tcWeight : 0;
 
       testcaseResults.push({
         testcase_id: tc.id,
@@ -95,6 +106,8 @@ export class SubmissionService {
         actual_output: tc.is_hidden ? (isPassed ? '[Matched]' : '[Mismatch]') : runResult.stdout,
         error: runResult.stderr || null,
         execution_time: runResult.executionTime,
+        marks_awarded: Math.round((marksAwarded + Number.EPSILON) * 100) / 100,
+        max_marks: Math.round((tcWeight + Number.EPSILON) * 100) / 100,
       });
     }
 
@@ -102,13 +115,29 @@ export class SubmissionService {
       passedCount = 0;
     }
 
-    const score = hasCompilationError
-      ? 0
-      : calculateQuestionScore({
+    let score = 0;
+    let maxScore = questionMarks;
+
+    if (!hasCompilationError) {
+      if (isEqualMarks) {
+        // Equal Marks per Question is ON: standard ratio formula
+        score = calculateQuestionScore({
           passedTestCases: passedCount,
           totalTestCases: totalCount,
           maxMarks: questionMarks,
         });
+        maxScore = questionMarks;
+      } else {
+        // Equal Marks per Question is OFF: Sum of marks for all passed test cases
+        const tcBased = calculateTestCaseBasedScore({
+          testcases,
+          testcaseResults,
+          totalQuestionMarks: questionMarks,
+        });
+        score = tcBased.score;
+        maxScore = tcBased.maxScore;
+      }
+    }
 
     const newSubmission = {
       id: submissionId,
@@ -125,7 +154,8 @@ export class SubmissionService {
       passed_count: passedCount,
       total_testcases: totalCount,
       score,
-      max_score: questionMarks,
+      max_score: maxScore,
+      is_equal_marks: isEqualMarks,
       status: hasCompilationError
         ? 'COMPILATION_ERROR'
         : (passedCount === totalCount && totalCount > 0 ? 'ACCEPTED' : (passedCount > 0 ? 'PARTIAL' : 'WRONG_ANSWER')),
@@ -170,13 +200,47 @@ export class SubmissionService {
           totalSessionScore += sScore;
         }
 
+        // Determine authoritative maximum marks for the assessment
+        let assessmentTotalMarks = Number(test?.total_marks || 100);
+        if (test) {
+          const testQuestionIds = Array.isArray(test.question_ids) ? test.question_ids : [];
+          if (isEqualMarks) {
+            const marksPerQ = Number(test.marks_per_question ?? test.marksPerQuestion ?? questionMarks);
+            if (testQuestionIds.length > 0) {
+              assessmentTotalMarks = testQuestionIds.length * marksPerQ;
+            }
+          } else {
+            // When Equal Marks is OFF, sum configured question test-case marks
+            let calculatedMax = 0;
+            for (const qId of testQuestionIds) {
+              const qObj = memoryStore.questions.find((x) => x.id === qId);
+              const qTcs = memoryStore.testcases.filter((tc) => tc.question_id === qId);
+              const hasCustom = qTcs.some((tc) => tc.marks !== undefined || tc.points !== undefined);
+              if (hasCustom && qTcs.length > 0) {
+                calculatedMax += qTcs.reduce((acc, tc) => acc + Number(tc.marks ?? tc.points ?? 0), 0);
+              } else if (qObj) {
+                calculatedMax += Number(qObj.marks || qObj.points || 20);
+              }
+            }
+            if (calculatedMax > 0) assessmentTotalMarks = calculatedMax;
+          }
+        }
+
         session.score = Math.round((totalSessionScore + Number.EPSILON) * 100) / 100;
+        session.total_marks = Math.round((assessmentTotalMarks + Number.EPSILON) * 100) / 100;
+        session.percentage = session.total_marks > 0
+          ? Math.round(((session.score / session.total_marks) * 100) * 100) / 100
+          : 0;
         session.updated_at = new Date().toISOString();
-        logger.info(`Updated session ${sessionId} total score to: ${session.score}`);
+        logger.info(`Updated session ${sessionId} total score to: ${session.score}/${session.total_marks} (${session.percentage}%)`);
 
         if (supabaseSubmissionsAvailable) {
           try {
-            await supabase.from('sessions').update({ score: session.score, updated_at: session.updated_at }).eq('id', sessionId);
+            await supabase.from('sessions').update({
+              score: session.score,
+              total_marks: session.total_marks,
+              updated_at: session.updated_at
+            }).eq('id', sessionId);
           } catch (sessionErr) {
             logger.warn('Failed to update session score in Supabase:', sessionErr.message);
           }

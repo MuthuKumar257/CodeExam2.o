@@ -203,14 +203,24 @@ export function getQuestionMaxMarks(question?: Partial<Question> | null, assessm
   if (assessment?.isEqualMarks && assessment?.marksPerQuestion) {
     return Math.max(1, Number(assessment.marksPerQuestion) || 10);
   }
-  return Math.max(1, Number(question?.points) || 10);
+  const testCases = (question as any)?.testCases || (question as any)?.testcases;
+  if (Array.isArray(testCases) && testCases.length > 0) {
+    const hasConfiguredMarks = testCases.some(
+      (tc: any) => (tc.points !== undefined && tc.points !== null) || (tc.marks !== undefined && tc.marks !== null)
+    );
+    if (hasConfiguredMarks) {
+      const sumTc = testCases.reduce((acc: number, tc: any) => acc + Number(tc.points ?? tc.marks ?? 0), 0);
+      if (sumTc > 0) return Math.round((sumTc + Number.EPSILON) * 100) / 100;
+    }
+  }
+  return Math.max(1, Number(question?.points ?? (question as any)?.marks) || 10);
 }
 
 /**
  * Returns the total max marks for an assessment (or for a candidate session).
  * 1. If session has a specific questionOrder, computes max marks for those exact assigned questions.
  * 2. If assessment has questionsPerCandidate, computes max marks for that assigned subset size.
- * 3. Correctly handles isEqualMarks & marksPerQuestion.
+ * 3. Correctly handles isEqualMarks & marksPerQuestion (ON) vs test-case marks (OFF).
  * 4. Never defaults to 100 when actual questions exist.
  */
 export function getAssessmentTotalMaxMarks(
@@ -236,9 +246,9 @@ export function getAssessmentTotalMaxMarks(
     const qMap = new Map(allQuestions.map((q) => [q.id, q]));
     const sum = session.questionOrder.reduce((acc, qid) => {
       const q = qMap.get(qid);
-      return acc + (q ? (Number(q.points) || 10) : 10);
+      return acc + (q ? getQuestionMaxMarks(q, assessment) : 10);
     }, 0);
-    if (sum > 0) return sum;
+    if (sum > 0) return Math.round((sum + Number.EPSILON) * 100) / 100;
   }
 
   // 2. If assessment specifies questionsPerCandidate
@@ -248,7 +258,8 @@ export function getAssessmentTotalMaxMarks(
     }
     const subset = allQuestions.slice(0, assessment.questionsPerCandidate);
     if (subset.length > 0) {
-      return subset.reduce((acc, q) => acc + (Number(q.points) || 10), 0);
+      const sum = subset.reduce((acc, q) => acc + getQuestionMaxMarks(q, assessment), 0);
+      return Math.round((sum + Number.EPSILON) * 100) / 100;
     }
     return assessment.questionsPerCandidate * 10;
   }
@@ -259,8 +270,8 @@ export function getAssessmentTotalMaxMarks(
   }
 
   if (allQuestions.length > 0) {
-    const sum = allQuestions.reduce((acc, q) => acc + (Number(q.points) || 10), 0);
-    if (sum > 0) return sum;
+    const sum = allQuestions.reduce((acc, q) => acc + getQuestionMaxMarks(q, assessment), 0);
+    if (sum > 0) return Math.round((sum + Number.EPSILON) * 100) / 100;
   }
 
   // 4. Assessment configured maximum_marks, maximumMarks, or totalPoints property

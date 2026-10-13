@@ -71,7 +71,28 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
   const [passwordError, setPasswordError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterTab, setFilterTab] = useState<'ALL' | 'AVAILABLE' | 'IN_PROGRESS' | 'COMPLETED'>('ALL');
+  const [filterTab, setFilterTab] = useState<'ALL' | 'AVAILABLE' | 'UPCOMING' | 'IN_PROGRESS' | 'COMPLETED'>('ALL');
+  const [currentTime, setCurrentTime] = useState<number>(Date.now());
+
+  // Clean, high-precision 1-second interval to dynamically enable scheduled assessments
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const formatCountdown = (seconds: number): string => {
+    if (seconds <= 0) return '00s';
+    const d = Math.floor(seconds / 86400);
+    const h = Math.floor((seconds % 86400) / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+
+    if (d > 0) return `${d}d ${h}h ${m}m`;
+    if (h > 0) return `${h}h ${m.toString().padStart(2, '0')}m ${s.toString().padStart(2, '0')}s`;
+    return `${m.toString().padStart(2, '0')}m ${s.toString().padStart(2, '0')}s`;
+  };
 
   const effectiveUserId = currentUserId || currentUser?.id || currentUser?.uid;
 
@@ -116,6 +137,10 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
       activeInProgSession: CandidateSession | null;
       attemptsUsed: number;
       maxAllowed: number;
+      isUpcoming: boolean;
+      secondsUntilStart: number;
+      startMs: number;
+      endMs: number;
       isAssessmentClosed: boolean;
       hasRestartPermission: boolean;
       restartPerm: any;
@@ -125,7 +150,7 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
       totalPoints: number;
       percentage: number;
       canShowResults: boolean;
-      statusCategory: 'AVAILABLE' | 'IN_PROGRESS' | 'COMPLETED' | 'CLOSED';
+      statusCategory: 'UPCOMING' | 'AVAILABLE' | 'IN_PROGRESS' | 'COMPLETED' | 'CLOSED';
     }>();
 
     uniqueAssessments.forEach((asm) => {
@@ -151,11 +176,21 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
       const maxAllowed = getMaxAllowedAttempts(asm);
       const hasActiveInProg = Boolean(activeInProgSession);
 
+      const startMs = asm.startTime
+        ? new Date(asm.startTime).getTime()
+        : (asm.start_time ? new Date(asm.start_time).getTime() : 0);
+      const endMs = asm.endTime
+        ? new Date(asm.endTime).getTime()
+        : (asm.end_time ? new Date(asm.end_time).getTime() : 0);
+
+      const isUpcoming = Boolean(startMs && currentTime < startMs && !hasActiveInProg);
+      const secondsUntilStart = isUpcoming ? Math.max(0, Math.floor((startMs - currentTime) / 1000)) : 0;
+
       const isAssessmentClosed =
         asm.status === 'CLOSED' ||
         asm.status === 'COMPLETED' ||
         asm.status === 'ARCHIVED' ||
-        (Boolean(asm.endTime) && new Date(asm.endTime).getTime() <= Date.now() && asm.status !== 'PAUSED');
+        (Boolean(endMs) && currentTime >= endMs && asm.status !== 'PAUSED');
 
       // Check restart permissions
       const candidateAliases = [
@@ -182,7 +217,7 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
       const hasRestartPermission = Boolean(restartPerm && restartPerm.allowed && !restartPerm.consumed);
       const canRetake =
         hasRestartPermission ||
-        (!isAssessmentClosed && (hasActiveInProg || attemptsUsed < maxAllowed));
+        (!isAssessmentClosed && !isUpcoming && (hasActiveInProg || attemptsUsed < maxAllowed));
 
       // Chronological sort
       const sortedCompleted = [...completedSessions].sort(
@@ -203,11 +238,13 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
       const percentage = latestMetrics.percentage;
       const canShowResults = asm.showResultsToStudents ?? asm.securitySettings?.showResultsToStudents ?? true;
 
-      let statusCategory: 'AVAILABLE' | 'IN_PROGRESS' | 'COMPLETED' | 'CLOSED';
+      let statusCategory: 'UPCOMING' | 'AVAILABLE' | 'IN_PROGRESS' | 'COMPLETED' | 'CLOSED';
       if (hasActiveInProg) {
         statusCategory = 'IN_PROGRESS';
-      } else if (attemptsUsed > 0 && !canRetake) {
+      } else if (attemptsUsed > 0 && !canRetake && !isUpcoming) {
         statusCategory = 'COMPLETED';
+      } else if (isUpcoming) {
+        statusCategory = 'UPCOMING';
       } else if (isAssessmentClosed && !hasRestartPermission) {
         statusCategory = 'CLOSED';
       } else {
@@ -220,6 +257,10 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
         activeInProgSession,
         attemptsUsed,
         maxAllowed,
+        isUpcoming,
+        secondsUntilStart,
+        startMs,
+        endMs,
         isAssessmentClosed,
         hasRestartPermission,
         restartPerm,
@@ -234,13 +275,14 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
     });
 
     return map;
-  }, [uniqueAssessments, sessions, submissions, questions, effectiveUserId, currentUser]);
+  }, [uniqueAssessments, sessions, submissions, questions, effectiveUserId, currentUser, currentTime]);
 
   // Overall Performance Statistics
   const overallStats = useMemo(() => {
     let totalAssigned = uniqueAssessments.length;
     let completedCount = 0;
     let availableCount = 0;
+    let upcomingCount = 0;
     let inProgressCount = 0;
     let totalEarnedScore = 0;
     let totalPossibleScore = 0;
@@ -257,7 +299,10 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
       if (meta.activeInProgSession) {
         inProgressCount++;
       }
-      if (meta.canRetake && !meta.isAssessmentClosed) {
+      if (meta.isUpcoming) {
+        upcomingCount++;
+      }
+      if (meta.canRetake && !meta.isAssessmentClosed && !meta.isUpcoming) {
         availableCount++;
       }
     });
@@ -285,6 +330,7 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
       totalAssigned,
       completedCount,
       availableCount,
+      upcomingCount,
       inProgressCount,
       totalEarnedScore,
       totalPossibleScore,
@@ -300,7 +346,10 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
       if (!meta) return false;
 
       // Tab filter
-      if (filterTab === 'AVAILABLE' && (!meta.canRetake || meta.isAssessmentClosed)) {
+      if (filterTab === 'AVAILABLE' && (!meta.canRetake || meta.isAssessmentClosed || meta.isUpcoming)) {
+        return false;
+      }
+      if (filterTab === 'UPCOMING' && !meta.isUpcoming) {
         return false;
       }
       if (filterTab === 'IN_PROGRESS' && !meta.activeInProgSession) {
@@ -536,6 +585,21 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
               {overallStats.availableCount}
             </span>
           </button>
+          {overallStats.upcomingCount > 0 && (
+            <button
+              onClick={() => setFilterTab('UPCOMING')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                filterTab === 'UPCOMING'
+                  ? 'bg-amber-600 text-white shadow-sm'
+                  : 'bg-[#141417] text-amber-400/90 hover:text-amber-300 border border-amber-500/30'
+              }`}
+            >
+              <span>Upcoming</span>
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                {overallStats.upcomingCount}
+              </span>
+            </button>
+          )}
           <button
             onClick={() => setFilterTab('IN_PROGRESS')}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -704,6 +768,10 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1 animate-pulse">
                         <RotateCcw className="w-3 h-3 text-amber-400" /> Restart Allowed by Faculty
                       </span>
+                    ) : meta.isUpcoming ? (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                        <Clock className="w-3 h-3 text-amber-400 animate-pulse" /> Starts in {formatCountdown(meta.secondsUntilStart)}
+                      </span>
                     ) : isAssessmentClosed ? (
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/80 flex items-center gap-1">
                         <Lock className="w-3 h-3 text-slate-400" /> Closed
@@ -829,6 +897,15 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
                             ? 'Unlock & Start'
                             : 'Start Assessment'}
                         </span>
+                      </button>
+                    ) : meta.isUpcoming ? (
+                      <button
+                        disabled
+                        className="px-4 py-2 rounded-xl text-xs font-bold bg-zinc-800/80 text-zinc-400 border border-zinc-700/60 cursor-not-allowed flex items-center space-x-1.5 opacity-90 shadow-sm"
+                        title={`Scheduled start: ${new Date(meta.startMs).toLocaleString()}`}
+                      >
+                        <Clock className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                        <span>Starts in {formatCountdown(meta.secondsUntilStart)}</span>
                       </button>
                     ) : isAssessmentClosed ? (
                       <span className="text-xs font-semibold text-zinc-400 italic flex items-center gap-1.5 py-1">
