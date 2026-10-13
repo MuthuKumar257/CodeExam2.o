@@ -62,6 +62,7 @@ import {
   getCandidateSessionMetrics,
   getQuestionMaxMarks,
 } from '../../utils/submissionUtils';
+import { isStudentUser } from '../../utils/classUtils';
 
 interface HistoryViewProps {
   assessments: Assessment[];
@@ -185,9 +186,12 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         return true;
       });
     }
-    // Candidate role fallback
+    // Candidate / Student role fallback: show assessments assigned to candidate or with existing sessions
     return assessments.filter(
-      (a) => a.candidateIds?.includes(currentUser.id) || sessions.some((s) => s.assessmentId === a.id && s.candidateId === currentUser.id)
+      (a) =>
+        a.candidateIds?.includes(currentUser.id) ||
+        (currentUser.uid && a.candidateIds?.includes(currentUser.uid)) ||
+        sessions.some((s) => s.assessmentId === a.id && (s.candidateId === currentUser.id || (s as any).studentId === currentUser.id))
     );
   }, [assessments, currentUser, classes, sessions]);
 
@@ -303,8 +307,17 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   // --------------------------------------------------------------------------
   const assessmentSessions = useMemo(() => {
     if (!selectedAssessment) return [];
-    return sessions.filter((s) => s.assessmentId === selectedAssessment.id);
-  }, [selectedAssessment, sessions]);
+    const allMatching = sessions.filter((s) => s.assessmentId === selectedAssessment.id);
+    if (isStudentUser(currentUser)) {
+      return allMatching.filter(
+        (s) =>
+          s.candidateId === currentUser.id ||
+          (s as any).studentId === currentUser.id ||
+          (currentUser.uid && (s.candidateId === currentUser.uid || (s as any).studentId === currentUser.uid))
+      );
+    }
+    return allMatching;
+  }, [selectedAssessment, sessions, currentUser]);
 
   // Resolved Questions pool: prioritize assessment.questions, then lookup questionIds from questions bank
   const resolvedQuestions = useMemo(() => {

@@ -3,6 +3,7 @@ import { ShieldCheck, User as UserIcon, Bell, ExternalLink, RefreshCw, KeyRound,
 import { User, UserRole } from '../../types';
 import { UserAvatar } from './UserAvatar';
 import { QueueStatus } from '../../services/clientWriteQueue';
+import { isStudentUser } from '../../utils/classUtils';
 
 interface HeaderProps {
   currentUser: User;
@@ -45,8 +46,8 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="hidden sm:block">
             <div className="text-xs font-semibold text-zinc-200">{currentUser.name}</div>
             <div className="label-mono text-[10px]">
-              {currentUser.role === 'CANDIDATE' ? 'student' : currentUser.role.toLowerCase()}
-              {currentUser.role === 'CANDIDATE' && (currentUser.registerNo || currentUser.registerNumber) && (
+              {isStudentUser(currentUser) ? 'student' : currentUser.role.toLowerCase()}
+              {isStudentUser(currentUser) && (currentUser.registerNo || currentUser.registerNumber) && (
                 <span className="text-indigo-400 ml-1">
                   • {currentUser.registerNo || currentUser.registerNumber}
                 </span>

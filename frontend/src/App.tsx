@@ -20,6 +20,8 @@ import { HistoryView } from './components/common/HistoryView';
 import { CandidateReview } from './components/faculty/CandidateReview';
 import { ReportsPage } from './components/faculty/ReportsPage';
 import { CandidatesPage } from './components/faculty/CandidatesPage';
+import { StudentRankingView } from './components/common/StudentRankingView';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { GraduationCap, ShieldCheck, Database, Loader2, Clock, AlertTriangle, RefreshCw, ExternalLink } from 'lucide-react';
 
 import { CandidateDashboard } from './components/candidate/CandidateDashboard';
@@ -436,7 +438,7 @@ export default function App() {
         }, user.role === 'FACULTY' ? user.id : undefined),
         subscribeStudentSettings((data) => {
           if (data) setStudentSettings(data);
-        }, user.role === 'CANDIDATE' ? user.id : undefined),
+        }, isStudentUser(user) ? user.id : undefined),
         subscribeInstitutions((data) => setInstitutions(data))
       );
     };
@@ -862,7 +864,7 @@ export default function App() {
       // Save user to Firestore / cache
       await saveUserToFirestore(newUser);
 
-      if (userData.role === 'CANDIDATE') {
+      if (userData.role === 'CANDIDATE' || userData.role === 'STUDENT') {
         const assignedClassId = candidateClassIds[0] || null;
         setClasses((prev) =>
           prev.map((cls) => {
@@ -967,9 +969,9 @@ export default function App() {
 
   const handleUpdateUser = async (updatedUser: User): Promise<void> => {
     try {
-      // Normalize user based on role: CANDIDATE can belong to at most 1 class
+      // Normalize user based on role: student can belong to at most 1 class
       let normalizedUser: User = updatedUser;
-      if (updatedUser.role === 'CANDIDATE') {
+      if (isStudentUser(updatedUser)) {
         const assignedClassId = updatedUser.classIds && updatedUser.classIds.length > 0 ? updatedUser.classIds[0] : null;
         normalizedUser = {
           ...updatedUser,
@@ -1007,7 +1009,7 @@ export default function App() {
                 saveClassToFirestore(updatedCls).catch(console.error);
                 return updatedCls;
               }
-            } else if (normalizedUser.role === 'CANDIDATE') {
+            } else if (isStudentUser(normalizedUser)) {
               const assignedClassId = normalizedUser.classIds && normalizedUser.classIds.length > 0 ? normalizedUser.classIds[0] : null;
               const currentStudents = cls.studentIds || [];
               const isThisAssignedClass = assignedClassId && (cls.id === assignedClassId || cls.name === assignedClassId);
@@ -1169,7 +1171,7 @@ export default function App() {
           const uRegNo = u.registerNo ? String(u.registerNo).toLowerCase() : '';
           const uEmail = u.email ? String(u.email).toLowerCase() : '';
 
-          if (u.role === 'CANDIDATE') {
+          if (isStudentUser(u)) {
             const isStudentInNewClass =
               assignedStudentIdSet.has(uid) ||
               (uReg && assignedStudentIdSet.has(uReg)) ||
@@ -1253,7 +1255,7 @@ export default function App() {
           const uRegNo = u.registerNo ? String(u.registerNo).toLowerCase() : '';
           const uEmail = u.email ? String(u.email).toLowerCase() : '';
 
-          if (u.role === 'CANDIDATE') {
+          if (isStudentUser(u)) {
             const isAssignedToThisClass =
               newStudentIdSet.has(uid) ||
               (uReg && newStudentIdSet.has(uReg)) ||
@@ -1703,7 +1705,7 @@ export default function App() {
     try {
       // If currently active candidate is in this assessment, finish immediately via handleFinishAssessment
       if (
-        currentUser?.role === 'CANDIDATE' &&
+        isStudentUser(currentUser) &&
         activeCandidateAssessmentId === targetAsm.id
       ) {
         await handleFinishAssessment(reason);
@@ -3047,6 +3049,13 @@ export default function App() {
         onSuccess={(user) => {
           setSessionTimeoutNotice(null);
           setCurrentUser(user);
+          if (user.role === 'ADMIN' || (user.role as string) === 'SUPER_ADMIN') {
+            setActiveNav('admin_dashboard');
+          } else if (user.role === 'FACULTY') {
+            setActiveNav('faculty_dashboard');
+          } else {
+            setActiveNav('candidate_dashboard');
+          }
         }}
         sessionTimeoutMessage={sessionTimeoutNotice}
         onClearTimeoutMessage={() => setSessionTimeoutNotice(null)}
@@ -3055,7 +3064,7 @@ export default function App() {
   }
 
   // IF CANDIDATE IS IN PRE-TEST COUNTDOWN TIMER VIEW
-  if (currentUser.role === 'CANDIDATE' && candidateStage === 'PRE_TEST_TIMER') {
+  if (isStudentUser(currentUser) && candidateStage === 'PRE_TEST_TIMER') {
     return (
       <PreTestCountdownView
         assessment={activeAssessmentObj}
@@ -3072,7 +3081,7 @@ export default function App() {
   }
 
   // IF CANDIDATE IS IN FULLSCREEN WORKSPACE VIEW
-  if (currentUser.role === 'CANDIDATE' && candidateStage === 'WORKSPACE') {
+  if (isStudentUser(currentUser) && candidateStage === 'WORKSPACE') {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 font-sans">
         <AssessmentWorkspace
@@ -3576,10 +3585,10 @@ export default function App() {
             );
           })()}
 
-          {/* CANDIDATE VIEWS */}
-          {currentUser.role === 'CANDIDATE' && (
-            <>
-              {activeNav === 'candidate_settings' ? (
+          {/* CANDIDATE / STUDENT VIEWS */}
+          {isStudentUser(currentUser) && (
+            <ErrorBoundary>
+              {activeNav === 'candidate_settings' && (
                 <SystemSettingsView
                   systemSettings={systemSettings}
                   studentSettings={studentSettings}
@@ -3597,7 +3606,39 @@ export default function App() {
                     await saveUserToFirestore(updatedUser);
                   }}
                 />
-              ) : (
+              )}
+
+              {activeNav === 'candidate_history' && (
+                <HistoryView
+                  assessments={assessments}
+                  sessions={sessions}
+                  classes={classes}
+                  users={users}
+                  currentUser={currentUser}
+                  systemSettings={systemSettings}
+                  submissions={submissions}
+                  questions={questions}
+                  results={results}
+                  onInspectCandidate={(sessId) => {
+                    setSelectedSessionId(sessId);
+                  }}
+                  onRestartTest={handleRestartTest}
+                />
+              )}
+
+              {activeNav === 'candidate_rankings' && (
+                <StudentRankingView
+                  users={users}
+                  classes={classes}
+                  assessments={assessments}
+                  sessions={sessions}
+                  submissions={submissions}
+                  questions={questions}
+                  results={results}
+                />
+              )}
+
+              {(!['candidate_settings', 'candidate_history', 'candidate_rankings'].includes(activeNav)) && (
                 <>
                   {candidateStage === 'DASHBOARD' && (() => {
                     const studentClasses = classes.filter(
@@ -3613,8 +3654,9 @@ export default function App() {
                     );
                     const studentClassIds = studentClasses.map((c) => c.id);
                     const candidateAssessments = assessments.filter((a) => {
-                      if (a.candidateIds && a.candidateIds.includes(currentUser.id)) return true;
+                      if (a.candidateIds && (a.candidateIds.includes(currentUser.id) || (currentUser.uid && a.candidateIds.includes(currentUser.uid)))) return true;
                       if (studentClassIds.length > 0 && a.classId && studentClassIds.includes(a.classId)) return true;
+                      if (studentClassIds.length > 0 && a.assignedClassIds && a.assignedClassIds.some((cid) => studentClassIds.includes(cid))) return true;
                       if (studentClassIds.length === 0) return true;
                       return false;
                     });
@@ -3632,6 +3674,8 @@ export default function App() {
                         assessments={visibleAssessments}
                         sessions={sessions}
                         submissions={submissions}
+                        questions={questions}
+                        currentUser={currentUser}
                         currentUserId={currentUser.id}
                         onStartAssessment={handleCandidateStartAssessment}
                         onViewResults={(asmId) => {
@@ -3646,6 +3690,7 @@ export default function App() {
                           setCandidateStage('FINISHED');
                         }}
                         onOpenPrivacyNotice={() => setIsPrivacyModalOpen(true)}
+                        onNavigateToTab={(tab) => setActiveNav(tab)}
                       />
                     );
                   })()}
@@ -3814,9 +3859,9 @@ export default function App() {
               )}
             </>
           )}
-        </>
+        </ErrorBoundary>
       )}
-        </main>
+    </main>
       </div>
 
       {/* Global Footer */}

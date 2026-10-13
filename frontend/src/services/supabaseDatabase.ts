@@ -470,6 +470,8 @@ export function isAssessmentActive(): boolean {
   return false;
 }
 
+const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+
 // Modular database fetching helpers to prevent monolithic /api/db/all loads
 let isFetchingUsers = false;
 let isFetchingClasses = false;
@@ -504,8 +506,7 @@ export async function fetchModularStudents(): Promise<void> {
   if (isAssessmentActive() || isFetchingUsers) return;
   isFetchingUsers = true;
   try {
-    const apiBase = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
-    const res = await fetch(`${apiBase}/api/students?limit=1000`);
+    const res = await fetch(`${API_BASE}/api/students?limit=1000`);
     if (!res.ok) {
       console.warn('[Modular Fetch Error]: /api/students returned status', res.status);
       return;
@@ -531,11 +532,10 @@ export async function refreshStudentsFromDatabase(): Promise<User[]> {
   return localUsers.filter(isStudentUser);
 }
 
-
 export async function fetchModularFaculty(): Promise<void> {
   if (isAssessmentActive()) return;
   try {
-    const res = await fetch('/api/faculty?limit=100');
+    const res = await fetch(`${API_BASE}/api/faculty?limit=500`);
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
@@ -554,7 +554,7 @@ export async function fetchModularClasses(): Promise<void> {
   if (isAssessmentActive() || isFetchingClasses) return;
   isFetchingClasses = true;
   try {
-    const res = await fetch('/api/classes?limit=100');
+    const res = await fetch(`${API_BASE}/api/classes?limit=500`);
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
@@ -573,7 +573,7 @@ export async function fetchModularDepartments(): Promise<void> {
   if (isAssessmentActive() || isFetchingDepartments) return;
   isFetchingDepartments = true;
   try {
-    const res = await fetch('/api/departments?limit=50');
+    const res = await fetch(`${API_BASE}/api/departments?limit=100`);
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
@@ -592,7 +592,7 @@ export async function fetchModularInstitutions(): Promise<void> {
   if (isAssessmentActive() || isFetchingInstitutions) return;
   isFetchingInstitutions = true;
   try {
-    const res = await fetch('/api/institutions?limit=20');
+    const res = await fetch(`${API_BASE}/api/institutions?limit=50`);
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
@@ -611,7 +611,7 @@ export async function fetchModularAssessments(): Promise<void> {
   if (isAssessmentActive() || isFetchingAssessments) return;
   isFetchingAssessments = true;
   try {
-    const res = await fetch('/api/tests?limit=100');
+    const res = await fetch(`${API_BASE}/api/tests?limit=500`);
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
@@ -632,7 +632,7 @@ export async function fetchModularQuestions(): Promise<void> {
   if (isAssessmentActive() || isFetchingQuestions) return;
   isFetchingQuestions = true;
   try {
-    const res = await fetch('/api/questions?limit=100');
+    const res = await fetch(`${API_BASE}/api/questions?limit=500`);
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
@@ -651,7 +651,7 @@ export async function fetchModularSessions(): Promise<void> {
   if (isAssessmentActive() || isFetchingSessions) return;
   isFetchingSessions = true;
   try {
-    const res = await fetch('/api/attempts?limit=100');
+    const res = await fetch(`${API_BASE}/api/attempts?limit=500`);
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
@@ -671,7 +671,7 @@ export async function fetchModularSubmissions(): Promise<void> {
   if (isAssessmentActive() || isFetchingSubmissions) return;
   isFetchingSubmissions = true;
   try {
-    const res = await fetch('/api/submissions?limit=100');
+    const res = await fetch(`${API_BASE}/api/submissions?limit=500`);
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
@@ -719,7 +719,7 @@ export async function reconcileAllData(): Promise<{ success: boolean; message: s
       studentSettings: localStudentSettings,
     };
 
-    const res = await fetch('/api/sync/reconcile', {
+    const res = await fetch(`${API_BASE}/api/sync/reconcile`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -1204,7 +1204,7 @@ export async function updateUserPassword(userId: string, newPassword: string): P
 
   // Sync to server backend directly
   try {
-    await fetch(`/api/users/${encodeURIComponent(userId)}/update-password`, {
+    await fetch(`${API_BASE}/api/users/${encodeURIComponent(userId)}/update-password`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1378,7 +1378,7 @@ export async function clearAllAssessmentsAndHistory(): Promise<boolean> {
 
   try {
     const token = localStorage.getItem('codeguard_token');
-    await fetch('/api/admin/clear-assessments-history', {
+    await fetch(`${API_BASE}/api/admin/clear-assessments-history`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
