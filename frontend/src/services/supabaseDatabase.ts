@@ -515,6 +515,23 @@ export function isStudentUser(user: any): boolean {
   return role === 'CANDIDATE' || role === 'STUDENT';
 }
 
+export function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  const token = typeof window !== 'undefined' ? localStorage.getItem('codeguard_auth_token') : null;
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  const cur = getLocalStoredUser();
+  if (cur?.id) {
+    headers['x-user-id'] = cur.id;
+    if (cur.role) headers['x-user-role'] = cur.role;
+    if (cur.institutionId) headers['x-user-institution'] = cur.institutionId;
+  }
+  return headers;
+}
+
 export function normalizeUserFields(user: any): User {
   if (!user || typeof user !== 'object') return user;
   const rawReg = user.registerNumber ?? user.register_number ?? user.registerNo ?? user.rollNumber;
@@ -680,11 +697,30 @@ export async function fetchModularSessions(): Promise<void> {
   if (isAssessmentActive() || isFetchingSessions) return;
   isFetchingSessions = true;
   try {
-    const res = await fetch(`${API_BASE}/api/attempts?limit=500`);
+    const cur = getLocalStoredUser();
+    const isStudent = isStudentUser(cur);
+    const endpoint = isStudent && cur?.id
+      ? `${API_BASE}/api/attempts?student_id=${encodeURIComponent(cur.id)}&limit=500`
+      : `${API_BASE}/api/attempts?limit=500`;
+
+    const res = await fetch(endpoint, {
+      headers: getAuthHeaders(),
+    });
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
-      localSessions = mergeArraySmart(localSessions, json.data);
+      if (isStudent && cur?.id) {
+        const studentOnly = json.data.filter(
+          (s: any) =>
+            s.candidateId === cur.id ||
+            s.student_id === cur.id ||
+            s.studentId === cur.id ||
+            (cur.email && s.candidateEmail?.toLowerCase() === cur.email.toLowerCase())
+        );
+        localSessions = studentOnly;
+      } else {
+        localSessions = mergeArraySmart(localSessions, json.data);
+      }
       saveStorage(STORAGE_KEYS.SESSIONS, localSessions);
       notify(listeners.sessions, localSessions);
       notify(listeners.attempts, localSessions as any);
@@ -700,11 +736,30 @@ export async function fetchModularSubmissions(): Promise<void> {
   if (isAssessmentActive() || isFetchingSubmissions) return;
   isFetchingSubmissions = true;
   try {
-    const res = await fetch(`${API_BASE}/api/submissions?limit=500`);
+    const cur = getLocalStoredUser();
+    const isStudent = isStudentUser(cur);
+    const endpoint = isStudent && cur?.id
+      ? `${API_BASE}/api/submissions?student_id=${encodeURIComponent(cur.id)}&limit=500`
+      : `${API_BASE}/api/submissions?limit=500`;
+
+    const res = await fetch(endpoint, {
+      headers: getAuthHeaders(),
+    });
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
-      localSubmissions = mergeArraySmart(localSubmissions, json.data);
+      if (isStudent && cur?.id) {
+        const studentOnly = json.data.filter(
+          (s: any) =>
+            s.candidateId === cur.id ||
+            s.student_id === cur.id ||
+            s.studentId === cur.id ||
+            (cur.email && s.candidateEmail?.toLowerCase() === cur.email.toLowerCase())
+        );
+        localSubmissions = studentOnly;
+      } else {
+        localSubmissions = mergeArraySmart(localSubmissions, json.data);
+      }
       saveStorage(STORAGE_KEYS.SUBMISSIONS, localSubmissions);
       notify(listeners.submissions, localSubmissions);
     }
@@ -916,10 +971,32 @@ export function getLocalStoredUser(): User | null {
 
 export function setLocalStoredUser(user: User | null): void {
   try {
+    const prev = getLocalStoredUser();
     if (user) {
       localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
+      if (prev && prev.id !== user.id) {
+        localSessions = [];
+        localSubmissions = [];
+        localResults = [];
+        saveStorage(STORAGE_KEYS.SESSIONS, []);
+        saveStorage(STORAGE_KEYS.SUBMISSIONS, []);
+        saveStorage(STORAGE_KEYS.RESULTS, []);
+        notify(listeners.sessions, []);
+        notify(listeners.submissions, []);
+        notify(listeners.results, []);
+      }
     } else {
       localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+      localStorage.removeItem('codeguard_auth_token');
+      localSessions = [];
+      localSubmissions = [];
+      localResults = [];
+      saveStorage(STORAGE_KEYS.SESSIONS, []);
+      saveStorage(STORAGE_KEYS.SUBMISSIONS, []);
+      saveStorage(STORAGE_KEYS.RESULTS, []);
+      notify(listeners.sessions, []);
+      notify(listeners.submissions, []);
+      notify(listeners.results, []);
     }
   } catch {}
 }
@@ -933,6 +1010,30 @@ export async function loginWithEmailPassword(identifier: string, pass: string): 
   const trimmed = identifier.trim().toLowerCase();
   const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
   let supabaseAuthError: (Error & SupabaseAuthError) | null = null;
+
+  // Attempt backend login first to obtain JWT token and authoritative user profile
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: trimmed, password: pass }),
+    });
+    if (res.ok) {
+      const json = await res.json();
+      if (json.success && json.data?.user) {
+        if (json.data.token) {
+          localStorage.setItem('codeguard_auth_token', json.data.token);
+        }
+        const userToReturn = { ...json.data.user, lastLoginAt: new Date().toISOString() };
+        setLocalStoredUser(userToReturn);
+        fetchModularSessions().catch(() => {});
+        fetchModularSubmissions().catch(() => {});
+        return userToReturn;
+      }
+    }
+  } catch (backendLoginErr) {
+    console.warn('[Backend Auth Login Skipped/Failed]:', backendLoginErr);
+  }
 
   // Check users managed by the application before contacting Supabase Auth.
   // These users may authenticate against the local/Supabase users table and do
@@ -1151,6 +1252,9 @@ export async function logoutUser(): Promise<void> {
       await supabase.auth.signOut();
     } catch {}
   }
+  try {
+    await fetch(`${API_BASE}/api/auth/logout`, { method: 'POST', headers: getAuthHeaders() }).catch(() => {});
+  } catch {}
   setLocalStoredUser(null);
 }
 

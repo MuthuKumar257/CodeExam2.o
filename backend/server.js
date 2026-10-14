@@ -147,7 +147,7 @@ app.use('/api/institutions', institutionsRouter);
 app.use(['/api/tests', '/api/assessments'], testRoutes);
 setInterval(() => {
   SessionService.expireDueSessions().catch((err) => logger.error('Assessment expiration worker failed:', err));
-}, 1000);
+}, 1000).unref();
 app.use('/api/questions', questionRoutes);
 app.use('/api/testcases', testcaseRoutes);
 app.use('/api/code', codeRoutes);
@@ -263,9 +263,15 @@ async function startServer() {
   });
 }
 
-startServer().catch((err) => {
-  logger.error(err.message);
-  process.exit(1);
-});
+const isDirectRun = process.argv[1] && (
+  process.argv[1].endsWith('server.js') || process.argv[1].endsWith('server')
+);
+
+if (isDirectRun && process.env.NODE_ENV !== 'test') {
+  startServer().catch((err) => {
+    logger.error(err.message);
+    process.exit(1);
+  });
+}
 
 export { app, server, io, startServer };

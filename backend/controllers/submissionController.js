@@ -6,6 +6,7 @@ import { SessionService } from '../services/sessionService.js';
 import { evaluateOutput } from '../services/scoringService.js';
 import { memoryStore } from '../services/supabaseService.js';
 import { randomUUID } from 'crypto';
+import { isStudentUser } from '../middleware/authMiddleware.js';
 import { sendSuccess, sendPaginated, sendError } from '../utils/response.js';
 
 export class SubmissionController {
@@ -13,7 +14,17 @@ export class SubmissionController {
     try {
       const { test_id, testId, student_id, studentId, page = 1, limit = 50 } = req.query;
       const targetTest = test_id || testId;
-      const targetStudent = student_id || studentId;
+      const requestedStudent = student_id || studentId;
+      const isStudent = isStudentUser(req.user);
+
+      let targetStudent = requestedStudent;
+      if (isStudent) {
+        if (requestedStudent && requestedStudent !== req.user.id && requestedStudent !== req.user.email) {
+          return sendError(res, 'Access denied. You can only view your own submissions.', 403, 'FORBIDDEN', req.requestId);
+        }
+        targetStudent = req.user.id;
+      }
+
       const p = Math.max(1, Number(page));
       const l = Math.max(1, Number(limit));
 
@@ -81,8 +92,19 @@ export class SubmissionController {
       const targetTestId = test_id || testId || req.body.assessmentId;
       const targetQuestionId = question_id || questionId;
       const targetSessionId = session_id || sessionId;
-      const targetStudentId = student_id || studentId || req.user?.id;
-      const studentName = req.user?.name || req.body.student_name || 'Student';
+      const requestedStudentId = student_id || studentId;
+      const isStudent = isStudentUser(req.user);
+
+      let targetStudentId = requestedStudentId || req.user?.id;
+      let studentName = req.user?.name || req.body.student_name || 'Student';
+
+      if (isStudent) {
+        if (requestedStudentId && requestedStudentId !== req.user.id && requestedStudentId !== req.user.email) {
+          return sendError(res, 'Access denied. You cannot submit code for another student.', 403, 'FORBIDDEN', req.requestId);
+        }
+        targetStudentId = req.user.id;
+        studentName = req.user.name || 'Student';
+      }
 
       const submittedCode = code ?? sourceCode;
       if (!targetTestId || !targetQuestionId || !submittedCode || !language) {
@@ -164,6 +186,14 @@ export class SubmissionController {
       if (!sub) {
         return sendError(res, 'Submission not found.', 404, 'NOT_FOUND');
       }
+      const isStudent = isStudentUser(req.user);
+      if (isStudent) {
+        const ownerId = sub.student_id || sub.candidateId;
+        const ownerEmail = sub.student_email || sub.candidateEmail;
+        if (ownerId !== req.user.id && ownerEmail !== req.user.email) {
+          return sendError(res, 'Access denied. You can only view your own submission.', 403, 'FORBIDDEN', req.requestId);
+        }
+      }
       return sendSuccess(res, sub);
     } catch (err) {
       next(err);
@@ -172,7 +202,11 @@ export class SubmissionController {
 
   static async getTestSubmissions(req, res, next) {
     try {
-      const list = await SubmissionService.getTestSubmissions(req.params.testId);
+      let list = await SubmissionService.getTestSubmissions(req.params.testId);
+      const isStudent = isStudentUser(req.user);
+      if (isStudent) {
+        list = list.filter((s) => s.student_id === req.user.id || s.candidateId === req.user.id);
+      }
       return sendSuccess(res, list);
     } catch (err) {
       next(err);
@@ -181,6 +215,10 @@ export class SubmissionController {
 
   static async getStudentSubmissions(req, res, next) {
     try {
+      const isStudent = isStudentUser(req.user);
+      if (isStudent && req.params.studentId !== req.user.id && req.params.studentId !== req.user.email) {
+        return sendError(res, 'Access denied. You can only view your own submissions.', 403, 'FORBIDDEN', req.requestId);
+      }
       const list = await SubmissionService.getStudentSubmissions(req.params.studentId, req.query.testId);
       return sendSuccess(res, list);
     } catch (err) {

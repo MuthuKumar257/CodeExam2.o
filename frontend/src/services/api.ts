@@ -41,7 +41,8 @@ async function request<T>(path: string, options: RequestOptions = {}, maxRetries
   }
 
   const exec = async (): Promise<T> => {
-    const token = auth.currentUser ? await auth.currentUser.getIdToken() : null;
+    const storedToken = typeof window !== 'undefined' ? localStorage.getItem('codeguard_auth_token') : null;
+    const token = (auth.currentUser ? await auth.currentUser.getIdToken() : null) || storedToken;
     const headers = new Headers(options.headers);
     if (token) headers.set('Authorization', `Bearer ${token}`);
     const localUser = getLocalStoredUser();

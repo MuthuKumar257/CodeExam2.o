@@ -81,3 +81,13 @@ export function optionalAuthenticate(req, res, next) {
 
   next();
 }
+
+export function isStudentRole(role) {
+  if (!role || typeof role !== 'string') return false;
+  const r = role.toUpperCase();
+  return r === 'STUDENT' || r === 'CANDIDATE';
+}
+
+export function isStudentUser(user) {
+  return isStudentRole(user?.role);
+}

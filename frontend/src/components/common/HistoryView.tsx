@@ -187,10 +187,19 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       });
     }
     // Candidate / Student role fallback: show assessments assigned to candidate or with existing sessions
+    const myClasses = classes.filter(
+      (c) =>
+        (c.studentIds && (c.studentIds.includes(currentUser.id) || (currentUser.uid && c.studentIds.includes(currentUser.uid)) || (currentUser.email && c.studentIds.includes(currentUser.email)))) ||
+        (currentUser.classIds && (currentUser.classIds.includes(c.id) || currentUser.classIds.includes(c.name)))
+    );
+    const myClassIds = myClasses.map((c) => c.id);
+
     return assessments.filter(
       (a) =>
         a.candidateIds?.includes(currentUser.id) ||
         (currentUser.uid && a.candidateIds?.includes(currentUser.uid)) ||
+        (a.classId && myClassIds.includes(a.classId)) ||
+        (a.assignedClassIds && a.assignedClassIds.some((cid) => myClassIds.includes(cid))) ||
         sessions.some((s) => s.assessmentId === a.id && (s.candidateId === currentUser.id || (s as any).studentId === currentUser.id))
     );
   }, [assessments, currentUser, classes, sessions]);
@@ -244,8 +253,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           return (a.title || '').localeCompare(b.title || '');
         }
         if (assessmentSortBy === 'CANDIDATES') {
-          const countA = sessions.filter((s) => s.assessmentId === a.id).length;
-          const countB = sessions.filter((s) => s.assessmentId === b.id).length;
+          const isStudent = isStudentUser(currentUser);
+          const countA = isStudent
+            ? sessions.filter((s) => s.assessmentId === a.id && (s.candidateId === currentUser.id || (s as any).studentId === currentUser.id)).length
+            : sessions.filter((s) => s.assessmentId === a.id).length;
+          const countB = isStudent
+            ? sessions.filter((s) => s.assessmentId === b.id && (s.candidateId === currentUser.id || (s as any).studentId === currentUser.id)).length
+            : sessions.filter((s) => s.assessmentId === b.id).length;
           return countB - countA;
         }
         const timeA = new Date(a.createdAt || a.startTime || 0).getTime();
@@ -925,8 +939,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredAssessments.map((asm) => {
-                const targetClass = classes.find((c) => c.id === asm.classId);
-                const asmCandidateSessions = sessions.filter((s) => s.assessmentId === asm.id);
+                const isStudent = isStudentUser(currentUser);
+                const asmCandidateSessions = isStudent
+                  ? sessions.filter((s) => s.assessmentId === asm.id && (s.candidateId === currentUser.id || (s as any).studentId === currentUser.id))
+                  : sessions.filter((s) => s.assessmentId === asm.id);
                 const completedCount = asmCandidateSessions.filter((s) => s.state === 'SUBMITTED' || s.state === 'AUTO_SUBMITTED' || s.completedAt || s.state === 'TERMINATED_MALPRACTICE').length;
                 const flaggedCount = asmCandidateSessions.filter(
                   (s) => s.warningsCount >= 3 || s.state === 'FLAGGED' || s.state === 'TERMINATED_MALPRACTICE'

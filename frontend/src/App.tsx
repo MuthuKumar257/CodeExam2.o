@@ -3678,14 +3678,14 @@ export default function App() {
               {activeNav === 'candidate_history' && (
                 <HistoryView
                   assessments={assessments}
-                  sessions={sessions}
+                  sessions={sessions.filter((s) => s.candidateId === currentUser.id || (s as any).studentId === currentUser.id)}
                   classes={classes}
                   users={users}
                   currentUser={currentUser}
                   systemSettings={systemSettings}
-                  submissions={submissions}
+                  submissions={submissions.filter((s) => s.candidateId === currentUser.id || (s as any).studentId === currentUser.id)}
                   questions={questions}
-                  results={results}
+                  results={results.filter((r) => r.candidateId === currentUser.id || (r as any).studentId === currentUser.id)}
                   onInspectCandidate={(sessId) => {
                     setSelectedSessionId(sessId);
                   }}
@@ -3739,8 +3739,8 @@ export default function App() {
                     return (
                       <CandidateDashboard
                         assessments={visibleAssessments}
-                        sessions={sessions}
-                        submissions={submissions}
+                        sessions={sessions.filter((s) => s.candidateId === currentUser.id || (s as any).studentId === currentUser.id)}
+                        submissions={submissions.filter((s) => s.candidateId === currentUser.id || (s as any).studentId === currentUser.id)}
                         questions={questions}
                         currentUser={currentUser}
                         currentUserId={currentUser.id}
@@ -3917,7 +3917,7 @@ export default function App() {
                   session={activeCandidateSession}
                   submissions={submissions.filter(
                     (s) =>
-                      s.candidateId === currentUser.id &&
+                      (s.candidateId === currentUser.id || (s as any).studentId === currentUser.id) &&
                       (s.sessionId === activeCandidateSession?.id || s.attemptId === activeCandidateSession?.id)
                   )}
                   onReturnToDashboard={() => setCandidateStage('DASHBOARD')}

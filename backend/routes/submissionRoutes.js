@@ -1,12 +1,14 @@
 import { Router } from 'express';
 import { SubmissionController } from '../controllers/submissionController.js';
-import { optionalAuthenticate } from '../middleware/authMiddleware.js';
+import { authenticate } from '../middleware/authMiddleware.js';
 
 const router = Router();
 
-router.get('/', optionalAuthenticate, SubmissionController.getSubmissions);
-router.post('/', optionalAuthenticate, SubmissionController.submitCode);
+router.get('/', authenticate, SubmissionController.getSubmissions);
+router.post('/', authenticate, SubmissionController.submitCode);
 router.post('/run', SubmissionController.runCode);
-router.get('/:id', optionalAuthenticate, SubmissionController.getSubmissionById);
+router.get('/student/:studentId', authenticate, SubmissionController.getStudentSubmissions);
+router.get('/test/:testId', authenticate, SubmissionController.getTestSubmissions);
+router.get('/:id', authenticate, SubmissionController.getSubmissionById);
 
 export default router;

@@ -15,7 +15,7 @@ router.put('/:id', authenticate, requireRole('ADMIN', 'FACULTY'), StudentControl
 router.delete('/:id', authenticate, requireRole('ADMIN', 'FACULTY'), StudentController.deleteStudent);
 
 // Student sessions and submissions subroutes
-router.get('/:studentId/sessions', optionalAuthenticate, SessionController.getStudentSessions);
-router.get('/:studentId/submissions', optionalAuthenticate, SubmissionController.getStudentSubmissions);
+router.get('/:studentId/sessions', authenticate, SessionController.getStudentSessions);
+router.get('/:studentId/submissions', authenticate, SubmissionController.getStudentSubmissions);
 
 export default router;

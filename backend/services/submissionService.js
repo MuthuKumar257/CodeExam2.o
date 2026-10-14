@@ -284,17 +284,58 @@ export class SubmissionService {
   }
 
   static async getSubmissionById(id) {
-    return memoryStore.submissions.find((s) => s.id === id || s.submission_id === id);
+    let sub = memoryStore.submissions.find((s) => s.id === id || s.submission_id === id);
+    if (!sub && isSupabaseConfigured && supabase) {
+      try {
+        const { data, error } = await supabase.from('submissions').select('*').or(`id.eq.${id},submission_id.eq.${id}`).maybeSingle();
+        if (!error && data) {
+          sub = data.data && typeof data.data === 'object' ? { ...data.data, ...data } : data;
+          if (!memoryStore.submissions.some((x) => x.id === sub.id)) {
+            memoryStore.submissions.push(sub);
+          }
+        }
+      } catch (err) {
+        logger.warn('Supabase getSubmissionById error:', err.message);
+      }
+    }
+    return sub || null;
   }
 
   static async getTestSubmissions(testId) {
-    return memoryStore.submissions.filter((s) => s.test_id === testId);
+    return memoryStore.submissions.filter((s) => s.test_id === testId || s.assessmentId === testId);
   }
 
   static async getStudentSubmissions(studentId, testId = null) {
-    let list = memoryStore.submissions.filter((s) => s.student_id === studentId);
+    let list = memoryStore.submissions.filter(
+      (s) => s.student_id === studentId || s.candidateId === studentId
+    );
+    if (isSupabaseConfigured && supabase) {
+      try {
+        let query = supabase
+          .from('submissions')
+          .select('*')
+          .or(`student_id.eq.${studentId},candidate_id.eq.${studentId}`);
+        if (testId) {
+          query = query.or(`test_id.eq.${testId},assessment_id.eq.${testId}`);
+        }
+        const { data, error } = await query;
+        if (!error && Array.isArray(data)) {
+          for (const s of data) {
+            const unpacked = s.data && typeof s.data === 'object' ? { ...s.data, ...s } : s;
+            if (!list.some((x) => x.id === unpacked.id)) {
+              list.push(unpacked);
+              if (!memoryStore.submissions.some((x) => x.id === unpacked.id)) {
+                memoryStore.submissions.push(unpacked);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        logger.warn('Supabase getStudentSubmissions error:', err.message);
+      }
+    }
     if (testId) {
-      list = list.filter((s) => s.test_id === testId);
+      list = list.filter((s) => s.test_id === testId || s.assessmentId === testId);
     }
     return list;
   }

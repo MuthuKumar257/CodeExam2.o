@@ -1,9 +1,13 @@
 import { ReportService } from '../services/reportService.js';
+import { isStudentUser } from '../middleware/authMiddleware.js';
 import { sendSuccess, sendPaginated, sendError } from '../utils/response.js';
 
 export class ReportController {
   static async getReports(req, res, next) {
     try {
+      if (isStudentUser(req.user)) {
+        return sendError(res, 'Access denied. Reports are restricted to faculty and administrators.', 403, 'FORBIDDEN', req.requestId);
+      }
       const { page = 1, limit = 50 } = req.query;
       const p = Math.max(1, Number(page));
       const l = Math.max(1, Number(limit));
@@ -26,6 +30,9 @@ export class ReportController {
 
   static async getOverviewReport(req, res, next) {
     try {
+      if (isStudentUser(req.user)) {
+        return sendError(res, 'Access denied. Overview reports are restricted to faculty and administrators.', 403, 'FORBIDDEN', req.requestId);
+      }
       const overview = await ReportService.getOverviewReport();
       return sendSuccess(res, overview);
     } catch (err) {
@@ -47,6 +54,10 @@ export class ReportController {
 
   static async getStudentReport(req, res, next) {
     try {
+      const isStudent = isStudentUser(req.user);
+      if (isStudent && req.params.studentId !== req.user.id && req.params.studentId !== req.user.email) {
+        return sendError(res, 'Access denied. You can only view your own report.', 403, 'FORBIDDEN', req.requestId);
+      }
       const report = await ReportService.getStudentReport(req.params.studentId);
       if (!report) {
         return sendError(res, 'Student not found.', 404, 'NOT_FOUND');

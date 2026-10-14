@@ -1,4 +1,5 @@
 import { RankingService } from '../services/rankingService.js';
+import { isStudentUser } from '../middleware/authMiddleware.js';
 import { sendSuccess, sendPaginated, sendError } from '../utils/response.js';
 
 export class RankingController {
@@ -32,6 +33,10 @@ export class RankingController {
 
   static async getStudentRank(req, res, next) {
     try {
+      const isStudent = isStudentUser(req.user);
+      if (isStudent && req.params.studentId !== req.user.id && req.params.studentId !== req.user.email) {
+        return sendError(res, 'Access denied. You can only view your own ranking.', 403, 'FORBIDDEN', req.requestId);
+      }
       const rank = await RankingService.getStudentRank(req.params.studentId);
       if (!rank) {
         return sendError(res, 'Student ranking not found.', 404, 'NOT_FOUND');

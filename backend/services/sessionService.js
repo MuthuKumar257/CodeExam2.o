@@ -45,7 +45,37 @@ export class SessionService {
   }
 
   static async getStudentSessions(studentId) {
-    return memoryStore.sessions.filter((s) => s.student_id === studentId);
+    let list = memoryStore.sessions.filter(
+      (s) => s.student_id === studentId || s.candidateId === studentId
+    );
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('sessions')
+          .select('*')
+          .or(`student_id.eq.${studentId},candidate_id.eq.${studentId}`);
+        if (!error && Array.isArray(data)) {
+          for (const s of data) {
+            const unpacked = s.data && typeof s.data === 'object' ? { ...s.data, ...s } : s;
+            if (!list.some((x) => x.id === unpacked.id)) {
+              list.push(unpacked);
+              if (!memoryStore.sessions.some((x) => x.id === unpacked.id)) {
+                memoryStore.sessions.push(unpacked);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        logger.warn('Supabase getStudentSessions error:', err.message);
+      }
+    }
+    return list;
+  }
+
+  static async getAllCompletedSessions() {
+    return memoryStore.sessions.filter(
+      (s) => s.status !== 'ACTIVE' && s.state !== 'ACTIVE'
+    );
   }
 
   static async getActiveSessions() {
@@ -508,6 +538,6 @@ export class SessionService {
   }
 
   static async getSessionsByTestId(testId) {
-    return memoryStore.sessions.filter((s) => s.test_id === testId);
+    return memoryStore.sessions.filter((s) => s.test_id === testId || s.assessmentId === testId);
   }
 }
