@@ -66,14 +66,6 @@ import {
 } from './types';
 
 import {
-  INITIAL_ASSESSMENTS,
-  INITIAL_QUESTIONS,
-  INITIAL_SESSIONS,
-  INITIAL_SUBMISSIONS,
-  INITIAL_AUDIT_LOGS,
-} from './data/seedData';
-
-import {
   auth,
   db,
   ensureAuth,
