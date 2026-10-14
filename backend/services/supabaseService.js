@@ -62,188 +62,13 @@ export const defaultUsers = [
 ];
 
 
-export const defaultQuestions = [
-  {
-    id: 'q-01',
-    title: 'Find Maximum Element',
-    description: 'Given an array of N integers, find and return the largest element.',
-    input_format: 'First line contains integer N. Second line contains N space-separated integers.',
-    output_format: 'Print the largest element in the array.',
-    constraints: '1 <= N <= 100000, -10^9 <= A[i] <= 10^9',
-    difficulty: 'EASY',
-    marks: 20,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'q-02',
-    title: 'Two Sum Problem',
-    description: 'Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.',
-    input_format: 'First line contains N and Target. Second line contains N space-separated integers.',
-    output_format: 'Print the two 0-based indices separated by space.',
-    constraints: '2 <= N <= 10^5, -10^9 <= nums[i] <= 10^9',
-    difficulty: 'MEDIUM',
-    marks: 30,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'q-03',
-    title: 'Valid Parentheses Matching',
-    description: 'Given a string containing just the characters "(", ")", "{", "}", "[" and "]", determine if the input string is valid.',
-    input_format: 'A single string S containing bracket characters.',
-    output_format: 'Print YES if valid, else NO.',
-    constraints: '1 <= length(S) <= 10^5',
-    difficulty: 'MEDIUM',
-    marks: 30,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'q-04',
-    title: 'Longest Palindromic Substring',
-    description: 'Given a string s, return the longest palindromic substring in s.',
-    input_format: 'A single line containing string s.',
-    output_format: 'Print the longest palindromic substring.',
-    constraints: '1 <= s.length <= 1000',
-    difficulty: 'HARD',
-    marks: 50,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-];
+export const defaultQuestions = [];
+export const defaultTestcases = [];
+export const defaultClasses = [];
+export const defaultDepartments = [];
+export const defaultInstitutions = [];
+export const defaultTests = [];
 
-export const defaultTestcases = [
-  {
-    id: 'tc-01-1',
-    question_id: 'q-01',
-    input: '5\n10 20 5 30 15',
-    expected_output: '30',
-    is_hidden: false,
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: 'tc-01-2',
-    question_id: 'q-01',
-    input: '4\n-10 -5 -20 -1',
-    expected_output: '-1',
-    is_hidden: false,
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: 'tc-01-3',
-    question_id: 'q-01',
-    input: '6\n100 200 50 400 300 250',
-    expected_output: '400',
-    is_hidden: true,
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: 'tc-01-4',
-    question_id: 'q-01',
-    input: '1\n42',
-    expected_output: '42',
-    is_hidden: true,
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: 'tc-02-1',
-    question_id: 'q-02',
-    input: '4 9\n2 7 11 15',
-    expected_output: '0 1',
-    is_hidden: false,
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: 'tc-02-2',
-    question_id: 'q-02',
-    input: '3 6\n3 2 4',
-    expected_output: '1 2',
-    is_hidden: true,
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: 'tc-03-1',
-    question_id: 'q-03',
-    input: '()[]{}',
-    expected_output: 'YES',
-    is_hidden: false,
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: 'tc-03-2',
-    question_id: 'q-03',
-    input: '(]',
-    expected_output: 'NO',
-    is_hidden: false,
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: 'tc-03-3',
-    question_id: 'q-03',
-    input: '([{}])',
-    expected_output: 'YES',
-    is_hidden: true,
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: 'tc-04-1',
-    question_id: 'q-04',
-    input: 'babad',
-    expected_output: 'bab',
-    is_hidden: false,
-    created_at: new Date().toISOString(),
-  },
-];
-
-export const defaultClasses = [
-  { id: 'cls-01', name: 'CSE - 3rd Year Section A', code: 'CSE-3A', department: 'Computer Science and Engineering', semester: 6, academic_year: '2025-2026', student_count: 65, created_at: new Date().toISOString() },
-  { id: 'cls-02', name: 'CSE - 3rd Year Section B', code: 'CSE-3B', department: 'Computer Science and Engineering', semester: 6, academic_year: '2025-2026', student_count: 62, created_at: new Date().toISOString() },
-  { id: 'cls-03', name: 'IT - Final Year Section A', code: 'IT-4A', department: 'Information Technology', semester: 8, academic_year: '2025-2026', student_count: 58, created_at: new Date().toISOString() },
-];
-
-export const defaultDepartments = [
-  { id: 'dept-01', name: 'Computer Science and Engineering', code: 'CSE', head_of_department: 'Dr. Alan Turing', faculty_count: 24, student_count: 480, created_at: new Date().toISOString() },
-  { id: 'dept-02', name: 'Information Technology', code: 'IT', head_of_department: 'Dr. Grace Hopper', faculty_count: 18, student_count: 360, created_at: new Date().toISOString() },
-  { id: 'dept-03', name: 'Artificial Intelligence & Data Science', code: 'AIDS', head_of_department: 'Dr. John McCarthy', faculty_count: 16, student_count: 240, created_at: new Date().toISOString() },
-];
-
-export const defaultInstitutions = [
-  { id: 'inst-01', name: 'CodeExam Institute of Technology', code: 'CEIT', location: 'Coimbatore, Tamil Nadu', domain: 'codeexam.edu', established_year: 1997, created_at: new Date().toISOString() },
-];
-
-export const defaultTests = [
-  {
-    id: 'test-01',
-    title: 'Data Structures & Algorithms Diagnostic',
-    description: 'Comprehensive coding evaluation on core DSA concepts including Arrays, Strings, and Two Pointers.',
-    faculty_id: 'usr-admin-cse-drngpit',
-    duration_minutes: 90,
-    total_marks: 100,
-    status: 'ACTIVE',
-    start_time: new Date(Date.now() - 3600000).toISOString(),
-    end_time: new Date(Date.now() + 86400000 * 7).toISOString(),
-    questions: ['q-01', 'q-02', 'q-03', 'q-04'],
-    class_id: 'cls-01',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'test-02',
-    title: 'Problem Solving & Logic Assessment',
-    description: 'Timed assessment evaluating algorithm efficiency, edge cases, and algorithmic complexity.',
-    faculty_id: 'usr-admin-cse-drngpit',
-    duration_minutes: 60,
-    total_marks: 50,
-    status: 'ACTIVE',
-    start_time: new Date(Date.now() - 1800000).toISOString(),
-    end_time: new Date(Date.now() + 86400000 * 5).toISOString(),
-    questions: ['q-01', 'q-02'],
-    class_id: 'cls-02',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-];
 
 function loadPersistentStore() {
   try {
@@ -276,17 +101,17 @@ for (const defUser of defaultUsers) {
 
 export const memoryStore = {
   users: initialUsers,
-  questions: loadedStore?.questions && loadedStore.questions.length > 0 ? loadedStore.questions : [...defaultQuestions],
-  testcases: loadedStore?.testcases && loadedStore.testcases.length > 0 ? loadedStore.testcases : [...defaultTestcases],
-  tests: loadedStore?.tests && loadedStore.tests.length > 0 ? loadedStore.tests : [...defaultTests],
-  classes: loadedStore?.classes && loadedStore.classes.length > 0 ? loadedStore.classes : [...defaultClasses],
-  departments: loadedStore?.departments && loadedStore.departments.length > 0 ? loadedStore.departments : [...defaultDepartments],
-  institutions: loadedStore?.institutions && loadedStore.institutions.length > 0 ? loadedStore.institutions : [...defaultInstitutions],
-  sessions: loadedStore?.sessions || [],
-  submissions: loadedStore?.submissions || [],
+  questions: Array.isArray(loadedStore?.questions) ? loadedStore.questions : [],
+  testcases: Array.isArray(loadedStore?.testcases) ? loadedStore.testcases : [],
+  tests: Array.isArray(loadedStore?.tests) ? loadedStore.tests : [],
+  classes: Array.isArray(loadedStore?.classes) ? loadedStore.classes : [],
+  departments: Array.isArray(loadedStore?.departments) ? loadedStore.departments : [],
+  institutions: Array.isArray(loadedStore?.institutions) ? loadedStore.institutions : [],
+  sessions: Array.isArray(loadedStore?.sessions) ? loadedStore.sessions : [],
+  submissions: Array.isArray(loadedStore?.submissions) ? loadedStore.submissions : [],
   deletedUserIds: new Set(loadedStore?.deletedUserIds || []),
   settings: loadedStore?.settings || {
-    institution_name: 'CodeExam Technical University',
+    institution_name: 'Dr. N.G.P. Institute of Technology',
     allow_registrations: true,
     maintenance_mode: false,
     session_timeout_minutes: 120,

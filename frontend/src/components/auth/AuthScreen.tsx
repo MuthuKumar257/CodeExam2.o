@@ -137,7 +137,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     } catch (err: any) {
       let msg = err?.message || 'Authentication failed. Please check your credentials.';
       if (err?.code === 'auth/operation-not-allowed' || err?.message?.includes('operation-not-allowed')) {
-        msg = 'Email/Password sign-in provider is disabled in Firebase Console. Please enable Email/Password under Authentication > Sign-in method, or use Quick Demo Sign In.';
+        msg = 'Email/Password sign-in provider is disabled. Please contact your system administrator.';
       } else if (err?.code === 'invalid_credentials' || err?.message?.toLowerCase().includes('invalid login credentials')) {
         msg = 'Invalid email or password. Please verify your credentials.';
       } else if (err?.code === 'user_already_exists' || err?.message?.toLowerCase().includes('already registered')) {

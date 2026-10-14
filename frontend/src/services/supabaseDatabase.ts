@@ -1154,23 +1154,6 @@ export async function logoutUser(): Promise<void> {
   setLocalStoredUser(null);
 }
 
-export async function quickDemoLogin(targetRole: UserRole): Promise<User> {
-  const demo = localUsers.find((u) => u.role === targetRole) || DEMO_USERS.find((u) => u.role === targetRole);
-  if (demo) {
-    setLocalStoredUser(demo);
-    return demo;
-  }
-  const genericDemo: User = {
-    id: `usr-${targetRole.toLowerCase()}-demo`,
-    name: `Demo ${targetRole}`,
-    email: `${targetRole.toLowerCase()}@codeguard.edu`,
-    role: targetRole,
-    createdAt: new Date().toISOString(),
-  };
-  await saveUserToFirestore(genericDemo);
-  setLocalStoredUser(genericDemo);
-  return genericDemo;
-}
 
 export async function sendPasswordResetLink(email: string): Promise<void> {
   if (supabase) {

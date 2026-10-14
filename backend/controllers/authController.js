@@ -29,15 +29,7 @@ export class AuthController {
       const isMatch = typeof user.password === 'string'
         ? await bcrypt.compare(password, user.password).catch(() => false)
         : false;
-      const allowDemoPasswords = process.env.NODE_ENV !== 'production' && process.env.ALLOW_DEMO_PASSWORDS !== 'false';
-      const isPlainMatch = allowDemoPasswords && (
-        password === user.password ||
-        password === 'Admin@123' ||
-        password === 'Student@123' ||
-        password === 'Faculty@123' ||
-        password === 'password123' ||
-        password === 'password'
-      );
+      const isPlainMatch = typeof user.password === 'string' && password === user.password;
 
       if (!isMatch && !isPlainMatch) {
         return sendError(res, 'Invalid email or password credentials.', 401, 'INVALID_CREDENTIALS');

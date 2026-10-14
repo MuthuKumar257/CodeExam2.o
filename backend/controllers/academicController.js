@@ -1,30 +1,18 @@
 import { memoryStore, supabase, isSupabaseConfigured } from '../services/supabaseService.js';
 import { sendSuccess, sendPaginated, sendError } from '../utils/response.js';
 
-// Default academic data
-export const defaultClasses = [
-  { id: 'cls-01', name: 'CSE - 3rd Year Section A', code: 'CSE-3A', department: 'Computer Science and Engineering', semester: 6, academic_year: '2025-2026', student_count: 65, created_at: new Date().toISOString() },
-  { id: 'cls-02', name: 'CSE - 3rd Year Section B', code: 'CSE-3B', department: 'Computer Science and Engineering', semester: 6, academic_year: '2025-2026', student_count: 62, created_at: new Date().toISOString() },
-  { id: 'cls-03', name: 'IT - Final Year Section A', code: 'IT-4A', department: 'Information Technology', semester: 8, academic_year: '2025-2026', student_count: 58, created_at: new Date().toISOString() },
-];
+export const defaultClasses = [];
+export const defaultDepartments = [];
+export const defaultInstitutions = [];
 
-export const defaultDepartments = [
-  { id: 'dept-01', name: 'Computer Science and Engineering', code: 'CSE', head_of_department: 'Dr. Alan Turing', faculty_count: 24, student_count: 480, created_at: new Date().toISOString() },
-  { id: 'dept-02', name: 'Information Technology', code: 'IT', head_of_department: 'Dr. Grace Hopper', faculty_count: 18, student_count: 360, created_at: new Date().toISOString() },
-  { id: 'dept-03', name: 'Artificial Intelligence & Data Science', code: 'AIDS', head_of_department: 'Dr. John McCarthy', faculty_count: 16, student_count: 240, created_at: new Date().toISOString() },
-];
-
-export const defaultInstitutions = [
-  { id: 'inst-01', name: 'CodeExam Institute of Technology', code: 'CEIT', location: 'Coimbatore, Tamil Nadu', domain: 'codeexam.edu', established_year: 1997, created_at: new Date().toISOString() },
-];
-
-// Initialize in memoryStore if not present or empty
-if (!memoryStore.classes || memoryStore.classes.length === 0) memoryStore.classes = [...defaultClasses];
-if (!memoryStore.departments || memoryStore.departments.length === 0) memoryStore.departments = [...defaultDepartments];
-if (!memoryStore.institutions || memoryStore.institutions.length === 0) memoryStore.institutions = [...defaultInstitutions];
+// Initialize collections in memoryStore if not initialized
+if (!memoryStore.classes) memoryStore.classes = [];
+if (!memoryStore.departments) memoryStore.departments = [];
+if (!memoryStore.institutions) memoryStore.institutions = [];
 if (!memoryStore.deletedClassIds) memoryStore.deletedClassIds = new Set();
 if (!memoryStore.deletedDepartmentIds) memoryStore.deletedDepartmentIds = new Set();
 if (!memoryStore.deletedInstitutionIds) memoryStore.deletedInstitutionIds = new Set();
+
 
 export class AcademicController {
   // CLASSES
