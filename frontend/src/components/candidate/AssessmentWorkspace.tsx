@@ -997,7 +997,17 @@ export const AssessmentWorkspace: React.FC<AssessmentWorkspaceProps> = ({
                   onLogProctoringEvent('MULTIPLE_FACES', event.metadata || { message: 'Multiple people detected in camera feed' });
                   registerProctoringWarning(
                     'MULTIPLE_FACES',
-                    '👥 Multiple People Detected: More than one face was detected in camera view. The assessment requires you to be alone.'
+                    '👥 Multiple People Detected: More than one face was detected in camera view. The assessment requires you to be alone.',
+                    { isAdvisoryOnly: true, metadata: event.metadata }
+                  );
+                }
+              } else if (event.type === 'LOOKING_AWAY') {
+                if (safeAssessment.securitySettings?.detectLookingAway !== false) {
+                  onLogProctoringEvent('LOOKING_AWAY', event.metadata);
+                  registerProctoringWarning(
+                    'LOOKING_AWAY',
+                    '👀 Screen Focus Advisory: Please face the camera and keep your focus on the test screen.',
+                    { isAdvisoryOnly: true, metadata: event.metadata }
                   );
                 }
               } else if (event.type === 'PHONE_DETECTED') {
@@ -1005,21 +1015,24 @@ export const AssessmentWorkspace: React.FC<AssessmentWorkspaceProps> = ({
                   onLogProctoringEvent('PHONE_DETECTED', event.metadata);
                   registerProctoringWarning(
                     'PHONE_DETECTED',
-                    '📱 Mobile Device Alert: A potential mobile device was detected in frame. Please keep your workspace and hands clear of smartphones.'
+                    '📱 Mobile Device Alert: A potential mobile device was detected in frame. Please keep your workspace and hands clear of smartphones.',
+                    { isWarningStrike: true, metadata: event.metadata }
                   );
                 }
               } else if (event.type === 'CAMERA_OBSTRUCTED') {
                 if (safeAssessment.securitySettings?.detectCameraObstruction !== false) {
                   registerProctoringWarning(
                     'CAMERA_OBSTRUCTED',
-                    '📷 Camera Obstructed: The camera feed is obstructed or too dark. Ensure good lighting.'
+                    '📷 Camera Obstructed: The camera feed is obstructed or too dark. Ensure good lighting.',
+                    { isAdvisoryOnly: true, metadata: event.metadata }
                   );
                 }
               } else if (event.type === 'VIDEO_FROZEN') {
                 if (safeAssessment.securitySettings?.detectVideoFreeze !== false) {
                   registerProctoringWarning(
                     'VIDEO_FROZEN',
-                    '❄️ Video Frozen: The camera feed appears frozen or looped.'
+                    '❄️ Video Frozen: The camera feed appears frozen or looped.',
+                    { isAdvisoryOnly: true, metadata: event.metadata }
                   );
                 }
               } else if (event.type === 'CAMERA_DISABLED') {
@@ -1027,7 +1040,8 @@ export const AssessmentWorkspace: React.FC<AssessmentWorkspaceProps> = ({
                 if (safeAssessment.securitySettings?.detectCameraDisabled !== false) {
                   registerProctoringWarning(
                     'CAMERA_DISABLED',
-                    '🚫 Camera Disabled: The camera connection appears offline or was disabled.'
+                    '🚫 Camera Disabled: The camera connection appears offline or was disabled.',
+                    { isAdvisoryOnly: true, metadata: event.metadata }
                   );
                   setCameraRetryCount((prev) => (prev >= 3 ? prev : prev + 1));
                 }
@@ -1035,7 +1049,8 @@ export const AssessmentWorkspace: React.FC<AssessmentWorkspaceProps> = ({
                 if (safeAssessment.securitySettings?.detectNoFace !== false) {
                   registerProctoringWarning(
                     'NO_FACE',
-                    '👤 No Face Detected: Your face is not visible in the camera frame. Please keep your face centered.'
+                    '👤 Face Centering Advisory: Your face is not visible in the camera frame. Please keep your face centered.',
+                    { isAdvisoryOnly: true, metadata: event.metadata }
                   );
                 }
               }
@@ -1865,7 +1880,11 @@ export const AssessmentWorkspace: React.FC<AssessmentWorkspaceProps> = ({
   };
 
   // Register proctoring warning event and trigger auto-submit if count reaches threshold (5)
-  const registerProctoringWarning = (type: string, message: string) => {
+  const registerProctoringWarning = (
+    type: string,
+    message: string,
+    options?: { isWarningStrike?: boolean; isAdvisoryOnly?: boolean; metadata?: Record<string, any> }
+  ) => {
     if (assessmentEndedRef.current || isAutoSubmitting) return;
 
     // Suppress warnings during initial warmup/setup (1.5 seconds only) or while screen-share prompt is open
@@ -1873,6 +1892,34 @@ export const AssessmentWorkspace: React.FC<AssessmentWorkspaceProps> = ({
     if (isRequestingScreenShare || showScreenSharePromptModal) return;
 
     const now = Date.now();
+    const isAdvisoryOnly = options?.isAdvisoryOnly === true || options?.isWarningStrike === false;
+
+    // Handle non-punitive camera movement advisories (looking away, posture adjustments, momentary occlusion)
+    if (isAdvisoryOnly) {
+      const lastAdvisory = lastWarningTimesRef.current.get(`advisory_${type}`) || 0;
+      if (now - lastAdvisory < 6000) {
+        return; // Debounce advisory notifications to once every 6 seconds
+      }
+      lastWarningTimesRef.current.set(`advisory_${type}`, now);
+
+      // Display gentle non-punitive guidance toast/banner without incrementing strike counters
+      setInfoToast({
+        message,
+        type: 'warning',
+      });
+
+      // Log proctoring audit event for faculty review with full metadata
+      onLogProctoringEvent(type, {
+        message,
+        timestamp: new Date().toISOString(),
+        isWarningStrike: false,
+        isAdvisory: true,
+        ...(options?.metadata || {}),
+      });
+
+      return;
+    }
+
     const lastTime = lastWarningTimesRef.current.get(type) || 0;
 
     // Minimum 3.5-second debounce for same warning type to prevent duplicate strikes from one incident
@@ -1901,6 +1948,7 @@ export const AssessmentWorkspace: React.FC<AssessmentWorkspaceProps> = ({
       timestamp: new Date().toISOString(),
       warningsCount: nextCount,
       isWarningStrike: true,
+      ...(options?.metadata || {}),
     });
 
     // Save to Firestore attempt immediately
@@ -1954,12 +2002,12 @@ export const AssessmentWorkspace: React.FC<AssessmentWorkspaceProps> = ({
     if (safeAssessment.securitySettings?.enableCamera === false) return;
     if (status === 'MULTIPLE_FACES' && safeAssessment.securitySettings?.detectMultipleFaces !== false) {
       onLogProctoringEvent('MULTIPLE_FACES', { message: message || 'Multiple people detected', timestamp: new Date().toISOString() });
-      registerProctoringWarning('MULTIPLE_FACES', message || 'Multiple people detected in camera feed');
+      registerProctoringWarning('MULTIPLE_FACES', message || 'Multiple people detected in camera feed', { isAdvisoryOnly: true });
     } else if (status === 'PHONE_DETECTED') {
-      registerProctoringWarning('PHONE_DETECTED', message || 'Mobile phone / smartphone detected in camera frame!');
+      registerProctoringWarning('PHONE_DETECTED', message || 'Mobile phone / smartphone detected in camera frame!', { isWarningStrike: true });
     } else if (status === 'NO_FACE') {
       if (safeAssessment.securitySettings?.detectNoFace !== false) {
-        registerProctoringWarning('NO_FACE', message || 'No candidate face detected in camera frame.');
+        registerProctoringWarning('NO_FACE', message || 'No candidate face detected in camera frame.', { isAdvisoryOnly: true });
       }
     }
   };

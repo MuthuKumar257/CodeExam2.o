@@ -70,6 +70,9 @@ export function getSeverityForEvent(type: ProctoringEventType): 'LOW' | 'MEDIUM'
     case 'WINDOW_FOCUS':
     case 'FULLSCREEN_ENTER':
     case 'FACE_OUT_OF_FRAME':
+    case 'LOOKING_AWAY':
+    case 'HEAD_POSE_DEVIATION':
+    case 'SUSPICIOUS_CAMERA_MOVEMENT':
     case 'WEBSOCKET_DISCONNECTED':
     default:
       return 'LOW';

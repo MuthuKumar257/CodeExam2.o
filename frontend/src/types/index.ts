@@ -180,6 +180,24 @@ export interface SecuritySettings {
   recordScreenRecording?: boolean;
   allowPause?: boolean;
   maxPauseDurationMinutes?: number;
+  proctoringThresholds?: Partial<ProctoringThresholds>;
+  detectLookingAway?: boolean;
+}
+
+export interface ProctoringThresholds {
+  minFaceConfidence: number;
+  maxYawDeg: number;
+  maxPitchDeg: number;
+  maxRollDeg: number;
+  lookingAwayDurationMs: number;
+  trackingLossGraceMs: number;
+  multipleFacesDurationMs: number;
+  cameraObstructionDurationMs: number;
+  videoFreezeDurationMs: number;
+  warningCooldownMs: number;
+  reviewEventMinIntervalMs: number;
+  temporalWindowSize: number;
+  hysteresisMargin: number;
 }
 
 export interface RiskWeights {
@@ -282,6 +300,9 @@ export type ProctoringEventType =
   | 'NO_FACE'
   | 'MULTIPLE_FACES'
   | 'FACE_OUT_OF_FRAME'
+  | 'LOOKING_AWAY'
+  | 'HEAD_POSE_DEVIATION'
+  | 'SUSPICIOUS_CAMERA_MOVEMENT'
   | 'WEBSOCKET_DISCONNECTED'
   | 'SUSPICIOUS_PASTE'
   | 'PHONE_DETECTED';

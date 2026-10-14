@@ -125,6 +125,8 @@ export const ProctorCamera: React.FC<ProctorCameraProps> = ({
     };
   }, [externalStream]);
 
+  const fallbackConsecutiveNoFaceRef = useRef<number>(0);
+
   // Sync external telemetry updates
   useEffect(() => {
     if (telemetry) {
@@ -136,7 +138,13 @@ export const ProctorCamera: React.FC<ProctorCameraProps> = ({
         setStatusMessage(`Multiple people detected (${telemetry.faceCount})`);
       } else {
         setFaceState('OK');
-        setStatusMessage('Face verified');
+        if (telemetry.headPose?.state === 'LOOKING_AWAY') {
+          setStatusMessage('Please face the camera');
+        } else if (telemetry.headPose && !telemetry.headPose.isWithinThresholds) {
+          setStatusMessage('Normal movement (slight angle)');
+        } else {
+          setStatusMessage('Face verified');
+        }
       }
 
       if (telemetry.phoneDetected !== lastPhoneRef.current) {
@@ -150,7 +158,7 @@ export const ProctorCamera: React.FC<ProctorCameraProps> = ({
 
   // Fallback analyzer if external telemetry is not piped in
   const analyzeFrameFallback = async () => {
-    if (!videoRef.current || !canvasRef.current || !streamActive) return;
+    if (!videoRef.current || !canvasRef.current || !streamActive || telemetry) return;
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -162,7 +170,7 @@ export const ProctorCamera: React.FC<ProctorCameraProps> = ({
     canvas.height = 120;
     ctx.drawImage(video, 0, 0, 160, 120);
 
-    let nextStatus: 'OK' | 'NO_FACE' | 'MULTIPLE_FACES' = 'OK';
+    let rawStatus: 'OK' | 'NO_FACE' | 'MULTIPLE_FACES' = 'OK';
     let msg = '';
 
     if ('FaceDetector' in window) {
@@ -170,20 +178,32 @@ export const ProctorCamera: React.FC<ProctorCameraProps> = ({
         const faceDetector = new (window as any).FaceDetector({ fastMode: true, maxFaces: 5 });
         const faces = await faceDetector.detect(canvas);
         if (faces.length === 0) {
-          nextStatus = 'NO_FACE';
+          rawStatus = 'NO_FACE';
           msg = 'No candidate face detected in camera frame.';
         } else if (faces.length > 1) {
-          nextStatus = 'MULTIPLE_FACES';
+          rawStatus = 'MULTIPLE_FACES';
           msg = `Multiple people detected in frame (${faces.length} faces)!`;
         } else {
-          nextStatus = 'OK';
+          rawStatus = 'OK';
           msg = 'Single candidate face verified.';
         }
       } catch {
-        nextStatus = performCanvasSkinToneAnalysis(ctx);
+        rawStatus = performCanvasSkinToneAnalysis(ctx);
       }
     } else {
-      nextStatus = performCanvasSkinToneAnalysis(ctx);
+      rawStatus = performCanvasSkinToneAnalysis(ctx);
+    }
+
+    // Temporal smoothing: require sustained absence (>= 2 ticks ~5.0s) before raising NO_FACE
+    let nextStatus = rawStatus;
+    if (rawStatus === 'NO_FACE') {
+      fallbackConsecutiveNoFaceRef.current++;
+      if (fallbackConsecutiveNoFaceRef.current < 2) {
+        nextStatus = 'OK'; // Still within grace period
+        msg = 'Checking candidate face...';
+      }
+    } else {
+      fallbackConsecutiveNoFaceRef.current = 0;
     }
 
     setFaceState(nextStatus);
