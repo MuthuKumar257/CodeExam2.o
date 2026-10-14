@@ -392,10 +392,78 @@ export class UserService {
       }
     }
 
-    // 2. Identify database duplicates
+    // 2. Identify database duplicates efficiently in batch
+    const candidateEmails = validCandidates.map((c) => c.email);
+    const candidateRegs = validCandidates.map((c) => c.registerNumber).filter(Boolean);
+
+    // Build fast in-memory lookup maps from memoryStore
+    const existingEmailMap = new Map();
+    const existingRegMap = new Map();
+
+    for (const u of memoryStore.users) {
+      const normEmail = this.normalizeEmail(u.email);
+      if (normEmail) existingEmailMap.set(normEmail, u);
+      const rawReg = u.register_number || u.registerNumber || u.registerNo;
+      const normReg = this.normalizeRegisterNumber(rawReg);
+      if (normReg) existingRegMap.set(normReg.toUpperCase(), u);
+    }
+
+    // Single batch query to Supabase for any uncached emails
+    if (isSupabaseConfigured && supabase) {
+      const uncachedEmails = candidateEmails.filter((e) => !existingEmailMap.has(e));
+      if (uncachedEmails.length > 0) {
+        try {
+          let { data, error } = await supabase.from('users').select('*').in('email', uncachedEmails);
+          if (error && error.code === 'PGRST205') {
+            const pRes = await supabase.from('profiles').select('*').in('email', uncachedEmails);
+            data = pRes.data;
+            error = pRes.error;
+          }
+          if (Array.isArray(data)) {
+            for (const u of data) {
+              const unpacked = u.data && typeof u.data === 'object' ? { ...u.data, ...u } : u;
+              const normEmail = this.normalizeEmail(unpacked.email);
+              if (normEmail) {
+                existingEmailMap.set(normEmail, unpacked);
+                if (!memoryStore.users.some((x) => x.id === unpacked.id)) memoryStore.users.push(unpacked);
+              }
+            }
+          }
+        } catch (e) {
+          logger.warn('[UserService] Supabase batch email check warning:', e.message);
+        }
+      }
+
+      // Single batch query to Supabase for any uncached register numbers
+      const uncachedRegs = candidateRegs.filter((r) => !existingRegMap.has(r.toUpperCase()));
+      if (uncachedRegs.length > 0) {
+        try {
+          let { data, error } = await supabase.from('users').select('*').in('register_number', uncachedRegs);
+          if (error && error.code === 'PGRST205') {
+            const pRes = await supabase.from('profiles').select('*').in('register_number', uncachedRegs);
+            data = pRes.data;
+            error = pRes.error;
+          }
+          if (Array.isArray(data)) {
+            for (const u of data) {
+              const unpacked = u.data && typeof u.data === 'object' ? { ...u.data, ...u } : u;
+              const rawReg = unpacked.register_number || unpacked.registerNumber || unpacked.registerNo;
+              const normReg = this.normalizeRegisterNumber(rawReg);
+              if (normReg) {
+                existingRegMap.set(normReg.toUpperCase(), unpacked);
+                if (!memoryStore.users.some((x) => x.id === unpacked.id)) memoryStore.users.push(unpacked);
+              }
+            }
+          }
+        } catch (e) {
+          logger.warn('[UserService] Supabase batch register_number check warning:', e.message);
+        }
+      }
+    }
+
     const candidatesToInsert = [];
     for (const candidate of validCandidates) {
-      const existingEmail = await this.findUserByNormalizedEmail(candidate.email);
+      const existingEmail = existingEmailMap.get(candidate.email);
       if (existingEmail) {
         alreadyRegistered.push({
           email: candidate.email,
@@ -408,7 +476,7 @@ export class UserService {
       }
 
       if (candidate.registerNumber) {
-        const existingReg = await this.findUserByRegisterNumber(candidate.registerNumber);
+        const existingReg = existingRegMap.get(candidate.registerNumber.toUpperCase());
         if (existingReg) {
           alreadyRegistered.push({
             email: candidate.email,
@@ -435,7 +503,9 @@ export class UserService {
 
       for (const item of batch) {
         const userId = `usr-student-${Date.now()}-${Math.floor(Math.random() * 100000)}-${preparedBatch.length}`;
-        const itemPassword = item.password ? await bcrypt.hash(item.password, 10) : hashedPassword;
+        const itemPassword = (item.password && item.password !== defaultPassword)
+          ? await bcrypt.hash(item.password, 10)
+          : hashedPassword;
 
         const studentRecord = {
           ...item,

@@ -374,7 +374,56 @@ Dr. John von Neumann, neumann@university.edu, EMP-103, Electronics & Communicati
         onClose();
         return;
       } catch (err: any) {
-        console.error('Bulk import students error:', err);
+        console.warn('Bulk import API warning, running fallback provisioning:', err);
+        let fallbackCount = 0;
+        const newStudentIds: string[] = [];
+        for (const rec of validRecords) {
+          try {
+            const studentId = `usr-student-${Date.now()}-${Math.floor(Math.random() * 10000)}-${fallbackCount}`;
+            const studentUser: Partial<User> = {
+              id: studentId,
+              name: rec.name.trim(),
+              email: rec.email.trim().toLowerCase(),
+              role: 'CANDIDATE',
+              registerNumber: rec.identifier.trim(),
+              registerNo: rec.identifier.trim(),
+              department: rec.department || 'Computer Science & Engineering',
+              password: defaultPassword,
+              classIds: selectedClassIds,
+              status: 'ACTIVE',
+              createdAt: new Date().toISOString(),
+            };
+            await onAddUser(studentUser);
+            newStudentIds.push(studentId);
+            fallbackCount++;
+          } catch (itemErr) {
+            console.error('Failed to provision student record:', itemErr);
+          }
+        }
+
+        if (selectedClassIds.length > 0 && newStudentIds.length > 0) {
+          for (const classId of selectedClassIds) {
+            const cls = classes.find((c) => c.id === classId);
+            if (cls) {
+              const updatedStudentIds = Array.from(new Set([...(cls.studentIds || []), ...newStudentIds]));
+              await saveClassToFirestore({ ...cls, studentIds: updatedStudentIds });
+            }
+          }
+        }
+
+        if (fallbackCount > 0) {
+          setIsImporting(false);
+          setPastedText('');
+          setParsedRecords([]);
+          setSelectedClassIds([]);
+          setFileName(null);
+          setErrorMsg(null);
+          setImportProgress({ current: 0, total: 0 });
+          onSuccess(fallbackCount);
+          onClose();
+          return;
+        }
+
         setErrorMsg(err.message || 'Failed to complete student import in database.');
         setIsImporting(false);
         return;

@@ -1,7 +1,11 @@
 import { auth, getLocalStoredUser } from './firebase';
 
 const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
-const REQUEST_TIMEOUT_MS = 15_000;
+const REQUEST_TIMEOUT_MS = 30_000;
+
+export interface RequestOptions extends RequestInit {
+  timeoutMs?: number;
+}
 
 export class ApiRequestError extends Error {
   status?: number;
@@ -22,7 +26,7 @@ export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-async function request<T>(path: string, options: RequestInit = {}, maxRetries: number = 2): Promise<T> {
+async function request<T>(path: string, options: RequestOptions = {}, maxRetries: number = 2): Promise<T> {
   const method = (options.method || 'GET').toUpperCase();
   const isGet = method === 'GET';
   const isDelete = method === 'DELETE';
@@ -50,9 +54,10 @@ async function request<T>(path: string, options: RequestInit = {}, maxRetries: n
 
     let attempt = 0;
     const retryableMethod = isGet || method === 'HEAD' || method === 'OPTIONS';
+    const effectiveTimeout = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
     while (true) {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      const timeout = setTimeout(() => controller.abort(), effectiveTimeout);
       const abortHandler = () => controller.abort();
       options.signal?.addEventListener('abort', abortHandler, { once: true });
       try {
@@ -720,13 +725,16 @@ export async function fetchReportsApi(params: { page?: number; limit?: number; s
 }
 
 // Bulk Student Import (/api/students/bulk-import or /api/students/import)
-export async function bulkImportStudentsApi(students: Array<{
-  name: string;
-  email: string;
-  registerNumber?: string;
-  department?: string;
-  password?: string;
-}>): Promise<{
+export async function bulkImportStudentsApi(
+  students: Array<{
+    name: string;
+    email: string;
+    registerNumber?: string;
+    department?: string;
+    password?: string;
+  }>,
+  options: { timeoutMs?: number } = {}
+): Promise<{
   success: boolean;
   data: {
     importedCount: number;
@@ -745,6 +753,7 @@ export async function bulkImportStudentsApi(students: Array<{
   return request('/api/students/bulk-import', {
     method: 'POST',
     body: JSON.stringify({ students }),
+    timeoutMs: options.timeoutMs ?? 60_000,
   });
 }
 
