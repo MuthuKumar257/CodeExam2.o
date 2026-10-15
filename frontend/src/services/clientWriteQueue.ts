@@ -164,9 +164,9 @@ export class ClientWriteQueue {
     const action = options.action || 'UPSERT';
     const priorityLevel = getPriorityLevel(table, options.priority);
     const priority = options.priority || (priorityLevel <= 2 ? 'HIGH' : priorityLevel >= 5 ? 'LOW' : 'NORMAL');
-    // Active assessment tables should never be dropped permanently
+    // Active assessment tables and database entities should never be dropped easily
     const isCriticalTable = ['submissions', 'attempts', 'sessions', 'answers', 'proctoring_events'].includes(table);
-    const maxRetries = options.maxRetries ?? (isCriticalTable ? 50 : 3);
+    const maxRetries = options.maxRetries ?? (isCriticalTable ? 50 : 20);
     const traceId = `cwq-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     const taskKey = `${table}:${recordId}`;
 
@@ -303,6 +303,7 @@ export class ClientWriteQueue {
         const isNotFound = httpStatus === 404;
         const isPermanentError = isSchemaCacheError || isValidationError || isNotFound;
 
+        const is429 = httpStatus === 429;
         const isAuthError =
           result.logEntry?.execution?.failureStage === 'HEADER_INSPECTION' ||
           httpStatus === 401 ||
@@ -310,12 +311,21 @@ export class ClientWriteQueue {
 
         const isCritical = ['submissions', 'attempts', 'sessions', 'answers', 'proctoring_events'].includes(task.table);
 
-        if (!isPermanentError && (task.retries < task.maxRetries || isCritical)) {
+        // HTTP 429 is temporary rate limiting; allow up to 30 retries with cooldown backoff rather than dropping data
+        const canRetry = !isPermanentError && (task.retries < task.maxRetries || isCritical || (is429 && task.retries < 30));
+
+        if (canRetry) {
           task.retries++;
           task.state = 'RETRY';
-          const backoffDelay = isAuthError
-            ? 800
-            : Math.min(15000, Math.pow(1.5, Math.min(task.retries, 8)) * 300 + Math.random() * 200);
+          let backoffDelay: number;
+          if (is429) {
+            // Respect rate-limit cooldown with exponential backoff (e.g. 2s to 12s)
+            backoffDelay = Math.min(15000, 2000 * Math.pow(1.3, Math.min(task.retries, 6)) + Math.random() * 500);
+          } else if (isAuthError) {
+            backoffDelay = 800;
+          } else {
+            backoffDelay = Math.min(15000, Math.pow(1.5, Math.min(task.retries, 8)) * 300 + Math.random() * 200);
+          }
 
           console.warn(
             `[ClientWriteQueue] Retrying [${task.table}:${task.recordId}] in ${Math.round(backoffDelay)}ms (Attempt ${task.retries}/${task.maxRetries}): ${result.error}`
