@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import {defineConfig} from 'vite';
 
 const configDir = path.dirname(fileURLToPath(import.meta.url));
-const apiTarget = process.env.VITE_API_URL || 'http://localhost:5000';
+const apiTarget = process.env.VITE_API_URL || 'https://codeexam2-o.onrender.com';
 
 if (process.env.VERCEL === '1') {
   if (!process.env.VITE_API_URL) throw new Error('VITE_API_URL must point to the API for this Vercel environment.');
