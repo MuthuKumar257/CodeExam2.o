@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import jwt from 'jsonwebtoken';
-import { memoryStore } from '../services/supabaseService.js';
+import { memoryStore, isSupabaseConfigured, supabase } from '../services/supabaseService.js';
 import { sendError } from '../utils/response.js';
 import { logger } from '../utils/logger.js';
 
@@ -31,7 +31,7 @@ function getDevHeaderUser(req) {
   };
 }
 
-export function authenticate(req, res, next) {
+export async function authenticate(req, res, next) {
   const token = getBearerToken(req);
   const isHeartbeatRoute = req.path.endsWith('/heartbeat');
 
@@ -41,6 +41,21 @@ export function authenticate(req, res, next) {
       req.user = decoded;
       return next();
     } catch (err) {
+      if (isSupabaseConfigured && supabase) {
+        try {
+          const { data, error: sbErr } = await supabase.auth.getUser(token);
+          if (!sbErr && data?.user) {
+            req.user = {
+              id: data.user.id,
+              email: data.user.email,
+              name: data.user.user_metadata?.full_name || data.user.user_metadata?.name || data.user.email,
+              role: (data.user.user_metadata?.role || data.user.app_metadata?.role || 'STUDENT').toUpperCase(),
+            };
+            return next();
+          }
+        } catch {}
+      }
+
       if (req.path.endsWith('/heartbeat')) {
         logger.warn(`[${req.requestId || 'NO_REQUEST_ID'}] Heartbeat auth rejected: ${err.name === 'TokenExpiredError' ? 'expired_token' : 'invalid_token'}.`);
       }
@@ -75,14 +90,29 @@ export function authenticate(req, res, next) {
   );
 }
 
-export function optionalAuthenticate(req, res, next) {
+export async function optionalAuthenticate(req, res, next) {
   const token = getBearerToken(req);
 
   if (token) {
     try {
       req.user = jwt.verify(token, JWT_SECRET);
       return next();
-    } catch {}
+    } catch {
+      if (isSupabaseConfigured && supabase) {
+        try {
+          const { data } = await supabase.auth.getUser(token);
+          if (data?.user) {
+            req.user = {
+              id: data.user.id,
+              email: data.user.email,
+              name: data.user.user_metadata?.name || data.user.email,
+              role: (data.user.user_metadata?.role || data.user.app_metadata?.role || 'STUDENT').toUpperCase(),
+            };
+            return next();
+          }
+        } catch {}
+      }
+    }
   }
 
   const devUser = getDevHeaderUser(req);

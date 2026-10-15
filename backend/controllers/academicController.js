@@ -75,9 +75,20 @@ export class AcademicController {
       if (!memoryStore.classes) memoryStore.classes = [];
       memoryStore.classes.push(newClass);
 
+      const sbRow = {
+        id: newClass.id,
+        name: newClass.name,
+        code: newClass.code,
+        department: newClass.department,
+        semester: newClass.semester,
+        student_count: 0,
+        data: newClass,
+        created_at: newClass.created_at,
+        updated_at: newClass.updated_at,
+      };
       if (isSupabaseConfigured && supabase) {
         try {
-          await supabase.from('classes').upsert(newClass);
+          await supabase.from('classes').upsert(sbRow);
         } catch {}
       }
       return sendSuccess(res, newClass, 'Class created.', 201);
@@ -104,7 +115,21 @@ export class AcademicController {
       memoryStore.classes[idx] = updated;
       if (isSupabaseConfigured && supabase) {
         try {
-          await supabase.from('classes').update(updated).eq('id', classId);
+          const sbRow = {
+            id: classId,
+            name: updated.name || '',
+            code: updated.code || '',
+            department: updated.department || '',
+            semester: Number(updated.semester || 1),
+            academic_year: updated.academic_year || updated.academicYear || '2025-2026',
+            student_count: Number(updated.student_count || updated.studentCount || (updated.student_ids || []).length || 0),
+            staff_ids: Array.isArray(updated.staff_ids || updated.staffIds) ? (updated.staff_ids || updated.staffIds) : [],
+            faculty_ids: Array.isArray(updated.faculty_ids || updated.facultyIds) ? (updated.faculty_ids || updated.facultyIds) : [],
+            student_ids: Array.isArray(updated.student_ids || updated.studentIds) ? (updated.student_ids || updated.studentIds) : [],
+            data: updated,
+            updated_at: new Date().toISOString(),
+          };
+          await supabase.from('classes').update(sbRow).eq('id', classId);
         } catch {}
       }
       return sendSuccess(res, updated, 'Class updated successfully.');

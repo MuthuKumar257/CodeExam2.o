@@ -54,7 +54,59 @@ function buildSupabaseRow(table, id, data) {
       updated_at: new Date().toISOString(),
     };
   }
-  return { ...data, id, updated_at: new Date().toISOString() };
+  if (table === 'classes') {
+    return {
+      id,
+      name: data.name || '',
+      code: data.code || '',
+      department: data.department || data.department_id || data.departmentId || '',
+      semester: Number(data.semester || 1),
+      academic_year: data.academic_year || data.academicYear || '2025-2026',
+      student_count: Number(data.student_count || data.studentCount || (data.student_ids || data.studentIds || []).length || 0),
+      staff_ids: Array.isArray(data.staff_ids || data.staffIds) ? (data.staff_ids || data.staffIds) : [],
+      faculty_ids: Array.isArray(data.faculty_ids || data.facultyIds) ? (data.faculty_ids || data.facultyIds) : [],
+      student_ids: Array.isArray(data.student_ids || data.studentIds) ? (data.student_ids || data.studentIds) : [],
+      data,
+      updated_at: new Date().toISOString(),
+    };
+  }
+  if (table === 'users' || table === 'students' || table === 'faculty') {
+    return {
+      id,
+      name: data.name || '',
+      email: data.email || '',
+      role: (data.role || 'STUDENT').toUpperCase(),
+      register_number: data.register_number || data.registerNumber || data.registrationNumber || null,
+      department: data.department || 'Computer Science & Engineering',
+      institution_id: data.institution_id || data.institutionId || 'inst-01',
+      avatar: data.avatar || null,
+      class_ids: Array.isArray(data.class_ids || data.classIds) ? (data.class_ids || data.classIds) : [],
+      data,
+      updated_at: new Date().toISOString(),
+    };
+  }
+  if (table === 'departments') {
+    return {
+      id,
+      name: data.name || '',
+      code: data.code || '',
+      head_of_department: data.head_of_department || data.headOfDepartment || '',
+      faculty_count: Number(data.faculty_count || data.facultyCount || 0),
+      student_count: Number(data.student_count || data.studentCount || 0),
+      data,
+      updated_at: new Date().toISOString(),
+    };
+  }
+  if (table === 'institutions') {
+    return {
+      id,
+      name: data.name || '',
+      code: data.code || '',
+      data,
+      updated_at: new Date().toISOString(),
+    };
+  }
+  return { ...data, id, data, updated_at: new Date().toISOString() };
 }
 
 function saveInMemory(table, id, data, config) {
@@ -199,13 +251,15 @@ router.post('/save', authenticate, async (req, res, next) => {
     let supabaseWarning = null;
 
     if (isSupabaseConfigured && supabase) {
+      const rowToUpsert = buildSupabaseRow(table, id, data);
       const { error } = await supabase
         .from(config.supabaseTable)
-        .upsert(buildSupabaseRow(table, id, data), { onConflict: 'id' });
+        .upsert(rowToUpsert, { onConflict: 'id' });
       if (error) {
-        if (production || error.code !== 'PGRST205') throw error;
-        supabaseStatus = 503;
-        supabaseWarning = `Supabase table "${config.supabaseTable}" is not provisioned; saved in backend memory only.`;
+        logger.warn(`Supabase upsert warning on table "${config.supabaseTable}": ${error.message}`);
+        supabaseStatus = 500;
+        supabaseError = { code: error.code, message: error.message };
+        supabaseWarning = `Supabase write failed: ${error.message}`;
       } else {
         supabaseStatus = 200;
       }
