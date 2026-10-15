@@ -255,10 +255,11 @@ export class SubmissionService {
         if (error) throw error;
         newSubmission.execution_metrics.databaseTime = Date.now() - databaseStarted;
       } catch (err) {
+        logger.error(`[Submission ${submissionId}] Supabase persistence failed:`, err.message);
         if (err.code === 'PGRST205' || /relation .* does not exist|schema cache/i.test(err.message || '')) {
           supabaseSubmissionsAvailable = false;
         }
-        logger.warn('Supabase create submission fallback:', err.message);
+        if (process.env.NODE_ENV === 'production') throw err;
       }
     }
     newSubmission.execution_metrics.totalTime = Date.now() - requestStarted;

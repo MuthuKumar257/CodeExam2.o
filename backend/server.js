@@ -28,7 +28,7 @@ import { errorMiddleware } from './middleware/errorMiddleware.js';
 import { requestContext } from './middleware/requestContext.js';
 import { rateLimit, securityHeaders } from './middleware/security.js';
 import { setupWebSocket } from './websocket/testSocket.js';
-import { isSupabaseConfigured, supabase } from './services/supabaseService.js';
+import { isSupabaseConfigured, supabase, syncFromSupabaseOnStartup } from './services/supabaseService.js';
 import { logger } from './utils/logger.js';
 import { SessionService } from './services/sessionService.js';
 import { sendError, sendSuccess } from './utils/response.js';
@@ -39,9 +39,12 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
+const allowedFrontendOrigins = (process.env.FRONTEND_URLS || process.env.FRONTEND_URL || 'http://localhost:5173')
+  .split(',').map((origin) => origin.trim()).filter(Boolean);
+
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: allowedFrontendOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id', 'x-user-role'],
@@ -172,7 +175,7 @@ app.use(errorMiddleware);
 const server = http.createServer(app);
 const io = new SocketIOServer(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: allowedFrontendOrigins,
     methods: ['GET', 'POST'],
   },
   pingTimeout: 10000,
@@ -227,7 +230,7 @@ server.on('error', (err) => {
 async function startServer() {
   if (process.env.NODE_ENV === 'production') {
     if (!isSupabaseConfigured || !supabase) {
-      logger.warn('[DB] Supabase credentials not configured in production; operating in resilient persistence mode.');
+      throw new Error('[DB] Refusing production startup without explicit Supabase server credentials.');
     } else {
       try {
         let { error } = await supabase.from('users').select('id').limit(1);
@@ -252,6 +255,11 @@ async function startServer() {
       }
     }
   }
+
+  // Complete persistence hydration before requests can reach memory-backed
+  // list/report handlers. In production, a failed sessions/submissions read
+  // aborts startup instead of returning an empty in-memory view as success.
+  await syncFromSupabaseOnStartup();
 
   return new Promise((resolve) => {
     server.listen(PORT, () => {

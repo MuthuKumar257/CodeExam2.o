@@ -11,6 +11,15 @@ const getEnvVar = (key: string): string => {
 
 const rawUrl = getEnvVar('VITE_SUPABASE_URL');
 const rawKey = getEnvVar('VITE_SUPABASE_PUBLISHABLE_KEY') || getEnvVar('VITE_SUPABASE_ANON_KEY');
+const expectedProjectRef = getEnvVar('VITE_SUPABASE_EXPECTED_PROJECT_REF');
+
+if (import.meta.env.PROD) {
+  let actualProjectRef = '';
+  try { actualProjectRef = new URL(rawUrl).hostname.split('.')[0]; } catch {}
+  if (!expectedProjectRef || actualProjectRef !== expectedProjectRef) {
+    throw new Error('Configured Supabase project does not match VITE_SUPABASE_EXPECTED_PROJECT_REF.');
+  }
+}
 
 // Validate URL format to prevent malformed requests that cause 401/400 errors
 const isValidSupabaseUrl = (url: string): boolean => {

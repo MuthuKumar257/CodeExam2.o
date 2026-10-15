@@ -2,6 +2,7 @@ import 'dotenv/config';
 import jwt from 'jsonwebtoken';
 import { memoryStore } from '../services/supabaseService.js';
 import { sendError } from '../utils/response.js';
+import { logger } from '../utils/logger.js';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
@@ -32,6 +33,7 @@ function getDevHeaderUser(req) {
 
 export function authenticate(req, res, next) {
   const token = getBearerToken(req);
+  const isHeartbeatRoute = req.path.endsWith('/heartbeat');
 
   if (token) {
     try {
@@ -39,11 +41,16 @@ export function authenticate(req, res, next) {
       req.user = decoded;
       return next();
     } catch (err) {
+      if (req.path.endsWith('/heartbeat')) {
+        logger.warn(`[${req.requestId || 'NO_REQUEST_ID'}] Heartbeat auth rejected: ${err.name === 'TokenExpiredError' ? 'expired_token' : 'invalid_token'}.`);
+      }
       return sendError(res, 'Invalid or expired token.', 401, 'INVALID_TOKEN', req.requestId);
     }
   }
 
-  const devUser = getDevHeaderUser(req);
+  // Heartbeats always require the signed application JWT, including local
+  // development. A caller-supplied x-user-id cannot establish session ownership.
+  const devUser = isHeartbeatRoute ? null : getDevHeaderUser(req);
   if (devUser) {
     req.user = {
       id: devUser.id,
@@ -52,6 +59,11 @@ export function authenticate(req, res, next) {
       role: (devUser.role || 'STUDENT').toUpperCase(),
     };
     return next();
+  }
+
+  if (isHeartbeatRoute) {
+    const reason = req.headers.authorization ? 'malformed_bearer_header' : 'missing_bearer_token';
+    logger.warn(`[${req.requestId || 'NO_REQUEST_ID'}] Heartbeat auth rejected: ${reason}.`);
   }
 
   return sendError(

@@ -1,6 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 
-const SOCKET_URL = (import.meta.env.VITE_SOCKET_URL || '').trim().replace(/\/$/, '');
+const SOCKET_URL = (import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_API_URL || '').trim().replace(/\/$/, '');
 
 // Session-specific socket pool to ensure exactly ONE resilient WebSocket connection per active test session
 const sessionSockets = new Map<string, Socket>();

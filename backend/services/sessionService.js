@@ -228,9 +228,11 @@ export class SessionService {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        await supabase.from('sessions').upsert(newSession);
+        const { error } = await supabase.from('sessions').upsert(newSession);
+        if (error) throw error;
       } catch (err) {
         logger.warn('Supabase create session fallback:', err.message);
+        if (process.env.NODE_ENV === 'production') throw err;
       }
     }
 
@@ -259,6 +261,15 @@ export class SessionService {
       } catch {}
     }
     if (!session) return null;
+
+    // Heartbeats may update a live attempt or finalize it at its deadline, but
+    // must never revive a submitted, terminated, or previously expired session.
+    if (session.status?.toUpperCase() !== 'ACTIVE' || (session.attempt_status && session.attempt_status !== 'IN_PROGRESS')) {
+      const error = new Error('This assessment session is no longer active.');
+      error.statusCode = 409;
+      error.errorCode = 'SESSION_NOT_ACTIVE';
+      throw error;
+    }
 
     const now = this.getServerTime();
     const nowIso = now.toISOString();
@@ -290,6 +301,7 @@ export class SessionService {
           ...(isExpired ? { status: 'EXPIRED', attempt_status: 'AUTO_SUBMITTED', submitted_at: nowIso, completed_at: nowIso } : {}),
         })
         .eq('id', sessionId)
+        .eq('status', 'ACTIVE')
         .then(() => {})
         .catch((err) => logger.warn('Supabase heartbeat sync error:', err.message));
     }
@@ -384,7 +396,7 @@ export class SessionService {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        await supabase.from('sessions').update({
+        const { error } = await supabase.from('sessions').update({
           score: session.score,
           total_marks: session.total_marks,
           percentage: session.percentage,
@@ -393,8 +405,10 @@ export class SessionService {
           completed_at: now,
           updated_at: now,
         }).eq('id', sessionId);
+        if (error) throw error;
       } catch (err) {
         logger.warn('Supabase submit session fallback:', err.message);
+        if (process.env.NODE_ENV === 'production') throw err;
       }
     }
 
@@ -472,7 +486,7 @@ export class SessionService {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        await supabase.from('sessions').update({
+        const { error } = await supabase.from('sessions').update({
           score: session.score,
           total_marks: session.total_marks,
           percentage: session.percentage,
@@ -481,8 +495,10 @@ export class SessionService {
           completed_at: session.completed_at,
           updated_at: now,
         }).eq('id', sessionId);
+        if (error) throw error;
       } catch (err) {
         logger.warn('Supabase auto submit session fallback:', err.message);
+        if (process.env.NODE_ENV === 'production') throw err;
       }
     }
     return session;

@@ -58,13 +58,15 @@ Code execution is isolated by the backend code-runner service; do not expose
 the development fallback storage mode to production traffic. Restrict CORS to
 the deployed frontend origin in the deployment environment.
 
-The production database is the existing Supabase project identified by
-`SUPABASE_URL`. The backend verifies that connection before listening and does not
-run migrations, seeds, resets, cleanup jobs, or table-creation scripts at startup.
-Frontend builds and backend restarts only replace application processes; they do
-not modify Supabase data. Apply reviewed, additive migrations manually using the
-files in [`supabase/migrations/`](./supabase/migrations/), after confirming a
-current Supabase backup and the target project.
+The production database is identified by both `SUPABASE_URL` and
+`SUPABASE_EXPECTED_PROJECT_REF`; the backend exits before serving requests if
+they disagree. Production requires a server-only Supabase key and never reads
+or writes `backend/data/db_store.json`. Startup only hydrates data from Supabase.
+Builds and restarts do not run migrations or seeds. The Vercel API and socket
+URLs are configured per environment with `VITE_API_URL` and `VITE_SOCKET_URL`;
+preview builds are required to use `VITE_DEPLOYMENT_TIER=staging` so they can be
+connected to an isolated staging backend/database. Apply reviewed migrations
+manually after confirming a current Supabase backup and target project.
 
 The included [`docker-compose.yml`](./docker-compose.yml) intentionally does not
 define a Postgres service or `DATABASE_URL`; it runs Redis only as an application

@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { logger } from '../utils/logger.js';
-import { isProduction, logDatabaseStartup } from './databaseSafety.js';
+import { isProduction, assertProductionDatabaseIdentity, logDatabaseStartup } from './databaseSafety.js';
 
 dotenv.config();
 
@@ -12,21 +12,33 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const STORE_FILE_PATH = path.resolve(__dirname, '../data/db_store.json');
 
-const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.SUPABASE_SECRET_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_SECRET_KEY ||
-  process.env.SUPABASE_PUBLISHABLE_KEY ||
-  process.env.SUPABASE_ANON_KEY ||
-  '';
+const production = process.env.NODE_ENV === 'production';
+const testing = process.env.NODE_ENV === 'test';
+// Production must use the explicit backend URL and a server-only key. Public
+// frontend configuration is useful for local development, but must never make
+// a production server appear database-backed when its real credentials are absent.
+const supabaseUrl = production
+  ? (process.env.SUPABASE_URL || '')
+  : (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '');
+const supabaseKey = production
+  ? (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY || '')
+  : (
+      process.env.SUPABASE_SERVICE_ROLE_KEY ||
+      process.env.SUPABASE_SECRET_KEY ||
+      process.env.NEXT_PUBLIC_SUPABASE_SECRET_KEY ||
+      process.env.SUPABASE_PUBLISHABLE_KEY ||
+      process.env.SUPABASE_ANON_KEY ||
+      ''
+    );
 
-export const isSupabaseConfigured = Boolean(
+export const isSupabaseConfigured = !testing && Boolean(
   supabaseUrl &&
   supabaseUrl.startsWith('http') &&
   supabaseKey &&
   supabaseKey.length > 10
 );
+
+if (production) assertProductionDatabaseIdentity(supabaseUrl);
 
 let supabaseClient = null;
 if (isSupabaseConfigured) {
@@ -34,12 +46,13 @@ if (isSupabaseConfigured) {
     supabaseClient = createClient(supabaseUrl, supabaseKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
-    logger.info('Connected to Supabase PostgreSQL at:', supabaseUrl);
+    const projectRef = new URL(supabaseUrl).hostname.split('.')[0];
+    logger.info(`[DB] Supabase client initialized for project ${projectRef}.`);
   } catch (err) {
     logger.warn('Failed to initialize Supabase client:', err.message);
   }
 } else {
-  logger.info('Supabase credentials not fully configured; running in resilient local storage mode.');
+  logger.warn(`[DB] Supabase is not configured; local-only mode is enabled only outside production (Environment: ${process.env.NODE_ENV || 'development'}).`);
 }
 
 export const supabase = supabaseClient;
@@ -71,6 +84,8 @@ export const defaultTests = [];
 
 
 function loadPersistentStore() {
+  // Host-local files are not a durable production database and can be stale.
+  if (production || testing) return null;
   try {
     if (fs.existsSync(STORE_FILE_PATH)) {
       const raw = fs.readFileSync(STORE_FILE_PATH, 'utf-8');
@@ -90,12 +105,14 @@ const loadedStore = loadPersistentStore();
 
 const initialUsers = loadedStore?.users && Array.isArray(loadedStore.users) && loadedStore.users.length > 0
   ? [...loadedStore.users]
-  : [...defaultUsers];
+  : (production ? [] : [...defaultUsers]);
 
 // Ensure essential default users exist in initialUsers if not present
-for (const defUser of defaultUsers) {
-  if (!initialUsers.some((u) => u.email === defUser.email || u.id === defUser.id)) {
-    initialUsers.push(defUser);
+if (!production) {
+  for (const defUser of defaultUsers) {
+    if (!initialUsers.some((u) => u.email === defUser.email || u.id === defUser.id)) {
+      initialUsers.push(defUser);
+    }
   }
 }
 
@@ -123,6 +140,8 @@ export const memoryStore = {
 
 let saveTimeout = null;
 export function savePersistentStore(immediate = false) {
+  // Never present ephemeral host storage as successful production persistence.
+  if (production || testing) return;
   const doSave = () => {
     try {
       const dataDir = path.dirname(STORE_FILE_PATH);
@@ -164,7 +183,10 @@ export function savePersistentStore(immediate = false) {
 }
 
 export async function syncFromSupabaseOnStartup() {
-  if (!isSupabaseConfigured || !supabase) return;
+  if (!isSupabaseConfigured || !supabase) {
+    if (production) throw new Error('[DB] Production startup requires explicit Supabase server credentials.');
+    return;
+  }
   try {
     let { data, error } = await supabase.from('users').select('*');
     if (error && error.code === 'PGRST205') {
@@ -172,7 +194,14 @@ export async function syncFromSupabaseOnStartup() {
       if (!pRes.error && Array.isArray(pRes.data)) {
         data = pRes.data;
         error = null;
+      } else if (production) {
+        throw pRes.error || error;
       }
+    }
+
+    if (error) {
+      logger.error(`[StartupSync] Could not load users from Supabase: ${error.message}`);
+      if (production) throw error;
     }
 
     if (!error && Array.isArray(data) && data.length > 0) {
@@ -188,46 +217,67 @@ export async function syncFromSupabaseOnStartup() {
       }
     }
 
-    // Sync assessments if present
-    try {
-      const aRes = await supabase.from('assessments').select('*');
-      if (!aRes.error && Array.isArray(aRes.data) && aRes.data.length > 0) {
-        logger.info(`[StartupSync] Synced ${aRes.data.length} assessments from Supabase.`);
-        memoryStore.tests = aRes.data;
+    // Session and submission endpoints read from memoryStore. Reload their
+    // canonical rows before the HTTP server starts so a routine host restart
+    // cannot make persisted attempts/results look empty.
+    for (const [table, memoryKey] of [['sessions', 'sessions'], ['submissions', 'submissions']]) {
+      const rows = [];
+      let loadSucceeded = true;
+      const pageSize = 1000;
+      for (let offset = 0; ; offset += pageSize) {
+        const { data: page, error: tableError } = await supabase
+          .from(table)
+          .select('*')
+          .range(offset, offset + pageSize - 1);
+        if (tableError) {
+          loadSucceeded = false;
+          logger.error(`[StartupSync] Could not load ${table} from Supabase: ${tableError.message}`);
+          if (production) throw tableError;
+          break;
+        }
+        if (!Array.isArray(page) || page.length === 0) break;
+        rows.push(...page);
+        if (page.length < pageSize) break;
       }
-    } catch {}
+      if (rows.length > 0) {
+        const unpackedRows = rows.map((row) =>
+          row.data && typeof row.data === 'object' ? { ...row.data, ...row } : row
+        );
+        memoryStore[memoryKey] = unpackedRows;
+        logger.info(`[StartupSync] Restored ${unpackedRows.length} ${table} from Supabase.`);
+      } else if (loadSucceeded) {
+        logger.info(`[StartupSync] Supabase ${table} query succeeded with no rows; existing in-memory records were retained.`);
+      }
+    }
 
-    // Sync classes if present
-    try {
-      const cRes = await supabase.from('classes').select('*');
-      if (!cRes.error && Array.isArray(cRes.data) && cRes.data.length > 0) {
-        logger.info(`[StartupSync] Synced ${cRes.data.length} classes from Supabase.`);
-        memoryStore.classes = cRes.data;
+    for (const [table, memoryKey] of [
+      ['assessments', 'tests'],
+      ['classes', 'classes'],
+      ['departments', 'departments'],
+      ['questions', 'questions'],
+    ]) {
+      try {
+        const { data: rows, error: tableError } = await supabase.from(table).select('*');
+        if (tableError) {
+          logger.error(`[StartupSync] Could not load ${table} from Supabase: ${tableError.message}`);
+          if (production) throw tableError;
+          continue;
+        }
+        if (Array.isArray(rows) && rows.length > 0) {
+          memoryStore[memoryKey] = rows;
+          logger.info(`[StartupSync] Restored ${rows.length} ${table} from Supabase.`);
+        } else {
+          logger.info(`[StartupSync] Supabase ${table} query succeeded with no rows; existing in-memory records were retained.`);
+        }
+      } catch (tableErr) {
+        logger.error(`[StartupSync] Failed to load ${table} from Supabase: ${tableErr.message}`);
+        if (production) throw tableErr;
       }
-    } catch {}
-
-    // Sync departments if present
-    try {
-      const dRes = await supabase.from('departments').select('*');
-      if (!dRes.error && Array.isArray(dRes.data) && dRes.data.length > 0) {
-        logger.info(`[StartupSync] Synced ${dRes.data.length} departments from Supabase.`);
-        memoryStore.departments = dRes.data;
-      }
-    } catch {}
-
-    // Sync questions if present
-    try {
-      const qRes = await supabase.from('questions').select('*');
-      if (!qRes.error && Array.isArray(qRes.data) && qRes.data.length > 0) {
-        logger.info(`[StartupSync] Synced ${qRes.data.length} questions from Supabase.`);
-        memoryStore.questions = qRes.data;
-      }
-    } catch {}
+    }
 
     savePersistentStore(true);
   } catch (err) {
-    logger.warn('[StartupSync] Supabase initial sync skipped:', err.message);
+    logger.error('[StartupSync] Supabase initial sync failed:', err.message);
+    if (production) throw err;
   }
 }
-
-syncFromSupabaseOnStartup().catch(() => {});

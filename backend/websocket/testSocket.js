@@ -1,5 +1,28 @@
 import { SessionService } from '../services/sessionService.js';
 import { logger } from '../utils/logger.js';
+import jwt from 'jsonwebtoken';
+import { isStudentUser } from '../middleware/authMiddleware.js';
+
+const JWT_SECRET = process.env.JWT_SECRET;
+
+function getSocketUser(socket) {
+  const token = socket.handshake.auth?.token;
+  if (typeof token !== 'string' || !token) return null;
+  try {
+    return jwt.verify(token, JWT_SECRET);
+  } catch (err) {
+    logger.warn(`[WebSocket] Session event rejected: ${err.name === 'TokenExpiredError' ? 'expired_token' : 'invalid_token'}.`);
+    return null;
+  }
+}
+
+function ownsSession(user, session) {
+  if (!isStudentUser(user) || !session) return false;
+  if (!Number.isFinite(user.exp) || user.exp * 1000 <= Date.now()) return false;
+  const ownerId = session.student_id || session.candidateId;
+  const ownerEmail = session.student_email || session.candidateEmail;
+  return ownerId === user.id || ownerEmail === user.email;
+}
 
 let globalIo = null;
 const sessionSocketMap = new Map();
@@ -23,7 +46,7 @@ export function setupWebSocket(io) {
 
   io.on('connection', (socket) => {
     let currentSessionId = null;
-    let currentStudentId = null;
+    const authenticatedUser = getSocketUser(socket);
 
     logger.info(`[WebSocket] Client connected: socket ${socket.id}`);
     const roomKey = (payload = {}) => `${payload.assessmentId || ''}:${payload.sessionId || ''}`;
@@ -79,11 +102,19 @@ export function setupWebSocket(io) {
     // Authenticate & Join Session Room
     const handleJoinSession = async (payload = {}) => {
       const sessionId = payload.sessionId || payload.session_id;
-      const studentId = payload.studentId || payload.student_id;
       if (!sessionId) return;
 
+      const session = await SessionService.getSessionById(sessionId);
+      if (!ownsSession(authenticatedUser, session)) {
+        logger.warn('[WebSocket] Session join rejected: missing_authentication_or_owner_mismatch.');
+        return;
+      }
+      if (session.status?.toUpperCase() !== 'ACTIVE' || (session.attempt_status && session.attempt_status !== 'IN_PROGRESS')) {
+        logger.warn('[WebSocket] Session join rejected: session_not_active.');
+        return;
+      }
+
       currentSessionId = sessionId;
-      currentStudentId = studentId;
 
       // Replace previous socket mapping for this session
       const prevSocketId = sessionSocketMap.get(sessionId);
@@ -101,10 +132,9 @@ export function setupWebSocket(io) {
 
       // Mark connection as connected without altering test status
       await SessionService.updateConnectionStatus(sessionId, 'connected');
-      const session = await SessionService.getSessionById(sessionId);
 
       const serverNow = SessionService.getServerTime();
-      const remainingSeconds = session ? SessionService.calculateRemainingSeconds(session.end_time, serverNow) : 0;
+      const remainingSeconds = SessionService.calculateRemainingSeconds(session.end_time, serverNow);
 
       // Emit session synchronization and time synchronization
       const syncData = {
@@ -135,6 +165,11 @@ export function setupWebSocket(io) {
       if (!sessionId) return;
 
       try {
+        const session = await SessionService.getSessionById(sessionId);
+        if (!ownsSession(authenticatedUser, session)) {
+          logger.warn('[WebSocket] Heartbeat rejected: missing_authentication_or_owner_mismatch.');
+          return;
+        }
         const hbResult = await SessionService.recordHeartbeat(sessionId);
         if (!hbResult) return;
 

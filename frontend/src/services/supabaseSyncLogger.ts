@@ -11,6 +11,8 @@
 
 import { supabase, safeGetSession } from './supabase';
 
+const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+
 export type SyncAction = 'UPSERT' | 'DELETE' | 'SYNC_ALL' | 'TEST_PROBE' | 'AUTH_SYNC';
 
 export type FailureStage =
@@ -465,6 +467,8 @@ class SupabaseSyncLogger {
       const rawUser = typeof window !== 'undefined' ? localStorage.getItem('codeguard_current_user') : null;
       if (rawUser) {
         const u = JSON.parse(rawUser);
+        const appToken = localStorage.getItem('codeguard_auth_token');
+        if (appToken) headers['Authorization'] = `Bearer ${appToken}`;
         if (u?.id && !headers['x-user-id']) headers['x-user-id'] = u.id;
         if (u?.role && !headers['x-user-role']) headers['x-user-role'] = u.role;
         if (u?.institutionId && !headers['x-user-institution']) headers['x-user-institution'] = u.institutionId;
@@ -566,7 +570,7 @@ class SupabaseSyncLogger {
             endpoint = '/api/db/save';
           }
 
-          const response = await fetch(endpoint, {
+          const response = await fetch(`${API_BASE}${endpoint}`, {
             method: isDelete ? 'DELETE' : 'POST',
             headers,
             body: isDelete ? undefined : JSON.stringify({ table, id: recordId, data }),

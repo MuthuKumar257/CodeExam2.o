@@ -453,7 +453,7 @@ GRANT ALL ON ALL ROUTINES IN SCHEMA public TO postgres, anon, authenticated, ser
 -- 13. RELOAD POSTGREST SCHEMA CACHE
 NOTIFY pgrst, 'reload schema';
 
--- 14. DEFAULT ADMIN SEED (Preserves existing data/passwords)
+-- 14. DEFAULT ADMIN SEED (never overwrite an existing account)
 INSERT INTO public.users (
   id, name, email, role, department, institution_id, password, created_at, updated_at
 ) VALUES (
@@ -466,9 +466,7 @@ INSERT INTO public.users (
   '$2a$10$CQSSpupAtyPZZUxWYOw2uOJ.aR5jd3zZtgx802BRQmVXf5aJr9bC.',
   now(),
   now()
-) ON CONFLICT (email) DO UPDATE SET
-  role = 'ADMIN',
-  updated_at = now();
+) ON CONFLICT (email) DO NOTHING;
 
 INSERT INTO public.profiles (
   id, name, email, role, department, institution_id, password, created_at, updated_at
@@ -482,6 +480,4 @@ INSERT INTO public.profiles (
   '$2a$10$CQSSpupAtyPZZUxWYOw2uOJ.aR5jd3zZtgx802BRQmVXf5aJr9bC.',
   now(),
   now()
-) ON CONFLICT (email) DO UPDATE SET
-  role = 'ADMIN',
-  updated_at = now();
+) ON CONFLICT (email) DO NOTHING;

@@ -2,6 +2,7 @@ import { SessionService } from '../services/sessionService.js';
 import { memoryStore } from '../services/supabaseService.js';
 import { isStudentUser } from '../middleware/authMiddleware.js';
 import { sendSuccess, sendPaginated, sendError } from '../utils/response.js';
+import { logger } from '../utils/logger.js';
 
 export class SessionController {
   static async getAllSessions(req, res, next) {
@@ -109,14 +110,22 @@ export class SessionController {
         return sendError(res, 'Session not found.', 404, 'NOT_FOUND');
       }
       const isStudent = isStudentUser(req.user);
-      if (isStudent) {
-        const ownerId = session.student_id || session.candidateId;
-        const ownerEmail = session.student_email || session.candidateEmail;
-        if (ownerId !== req.user.id && ownerEmail !== req.user.email) {
-          return sendError(res, 'Access denied. You can only update heartbeat for your own session.', 403, 'FORBIDDEN', req.requestId);
-        }
+      if (!isStudent) {
+        logger.warn(`[${req.requestId || 'NO_REQUEST_ID'}] Heartbeat rejected: authenticated_user_not_student.`);
+        return sendError(res, 'Only the student who owns this session can send its heartbeat.', 403, 'FORBIDDEN', req.requestId);
+      }
+      const ownerId = session.student_id || session.candidateId;
+      const ownerEmail = session.student_email || session.candidateEmail;
+      if (ownerId !== req.user.id && ownerEmail !== req.user.email) {
+        logger.warn(`[${req.requestId || 'NO_REQUEST_ID'}] Heartbeat rejected: session_owner_mismatch.`);
+        return sendError(res, 'Access denied. You can only update heartbeat for your own session.', 403, 'FORBIDDEN', req.requestId);
+      }
+      if (session.status?.toUpperCase() !== 'ACTIVE' || (session.attempt_status && session.attempt_status !== 'IN_PROGRESS')) {
+        logger.warn(`[${req.requestId || 'NO_REQUEST_ID'}] Heartbeat rejected: session_not_active.`);
+        return sendError(res, 'This assessment session is no longer active.', 409, 'SESSION_NOT_ACTIVE', req.requestId);
       }
       const result = await SessionService.recordHeartbeat(req.params.id);
+      if (!result) return sendError(res, 'Session not found.', 404, 'NOT_FOUND', req.requestId);
       return sendSuccess(res, result, 'Heartbeat recorded.');
     } catch (err) {
       next(err);

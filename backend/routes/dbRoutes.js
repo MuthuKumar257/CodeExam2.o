@@ -88,13 +88,13 @@ function sanitizeSavedRecord(table, record) {
 }
 
 async function readTable(table, fallback = []) {
-  if (!isSupabaseConfigured || !supabase) return fallback;
+  if (!isSupabaseConfigured || !supabase) {
+    if (process.env.NODE_ENV === 'production') throw new Error('[DB] Production database is unavailable.');
+    return fallback;
+  }
   const { data, error } = await supabase.from(table).select('*');
   if (error) {
-    if (error.code !== 'PGRST205') {
-      throw error;
-    }
-    return fallback;
+    throw error;
   }
   return Array.isArray(data) ? data : fallback;
 }
@@ -156,7 +156,7 @@ router.get('/all', async (_req, res, next) => {
   }
 });
 
-router.post('/save', async (req, res, next) => {
+router.post('/save', authenticate, async (req, res, next) => {
   try {
     const { table, id, data } = req.body || {};
     const config = typeof table === 'string' ? resolveTable(table) : null;
@@ -165,19 +165,35 @@ router.post('/save', async (req, res, next) => {
       return sendError(res, 'A supported table, record id, and object data are required.', 400, 'INVALID_DB_WRITE');
     }
 
+    const production = process.env.NODE_ENV === 'production';
+    if (production && (!isSupabaseConfigured || !supabase)) {
+      return sendError(res, 'Persistent database is unavailable.', 503, 'DATABASE_UNAVAILABLE');
+    }
+
+    if (production) {
+      const role = String(req.user?.role || '').toUpperCase();
+      const isPrivileged = role === 'ADMIN' || role === 'FACULTY';
+      if (!isPrivileged) {
+        const ownedStudentWrite = ['attempts', 'sessions', 'submissions'].includes(table) &&
+          data.deleted !== true &&
+          [data.student_id, data.studentId, data.candidateId, data.user_id].some((ownerId) => String(ownerId) === String(req.user?.id));
+        if (!ownedStudentWrite) {
+          return sendError(res, 'This account cannot modify the requested record.', 403, 'FORBIDDEN');
+        }
+      }
+    }
+
     // Check if client dispatched a DELETE action masquerading as a save
     if (data.deleted === true) {
-      saveInMemory(table, id, data, config);
       if (isSupabaseConfigured && supabase) {
-        try {
-          await supabase.from(config.supabaseTable).delete().eq('id', id);
-        } catch {}
+        const { error } = await supabase.from(config.supabaseTable).delete().eq('id', id);
+        if (error) throw error;
       }
+      saveInMemory(table, id, data, config);
       broadcastDatabaseUpdate({ table, id: String(id), action: 'delete' });
       return sendSuccess(res, { id, deleted: true, resolvedTable: config.supabaseTable });
     }
 
-    const saved = saveInMemory(table, id, data, config);
     let supabaseStatus = null;
     let supabaseError = null;
     let supabaseWarning = null;
@@ -187,26 +203,15 @@ router.post('/save', async (req, res, next) => {
         .from(config.supabaseTable)
         .upsert(buildSupabaseRow(table, id, data), { onConflict: 'id' });
       if (error) {
-        if (error.code === 'PGRST205') {
-          supabaseStatus = 503;
-          supabaseWarning = `Supabase table "${config.supabaseTable}" is not provisioned; saved in backend memory only.`;
-        } else {
-          supabaseError = error;
-        }
+        if (production || error.code !== 'PGRST205') throw error;
+        supabaseStatus = 503;
+        supabaseWarning = `Supabase table "${config.supabaseTable}" is not provisioned; saved in backend memory only.`;
       } else {
         supabaseStatus = 200;
       }
     }
 
-    if (supabaseError) {
-      return sendSuccess(res, {
-        saved: sanitizeSavedRecord(table, saved),
-        resolvedTable: config.supabaseTable,
-        supabaseStatus,
-        supabaseError,
-        supabaseWarning,
-      });
-    }
+    const saved = saveInMemory(table, id, data, config);
 
     broadcastDatabaseUpdate({ table, id: String(id), data: saved, action: 'save' });
     return sendSuccess(res, {

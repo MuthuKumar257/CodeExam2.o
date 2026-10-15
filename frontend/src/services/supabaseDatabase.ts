@@ -254,7 +254,10 @@ function saveStorage<T>(key: string, data: T): void {
 }
 
 // Initial Memory Store
-const localFallback = <T>(seed: T): T => seed;
+const localFallback = <T>(seed: T): T => {
+  if (import.meta.env.PROD && Array.isArray(seed)) return [] as unknown as T;
+  return seed;
+};
 let localUsers: User[] = loadStorage(STORAGE_KEYS.USERS, localFallback(DEMO_USERS))
   .filter((u) => !LEGACY_DEMO_USER_EMAILS.has(u.email?.toLowerCase() || ''));
 saveStorage(STORAGE_KEYS.USERS, localUsers);
@@ -1473,34 +1476,35 @@ export async function deleteAssessmentFromFirestore(asmId: string): Promise<void
 }
 
 export async function clearAllAssessmentsAndHistory(): Promise<boolean> {
-  localAssessments = [];
-  localSessions = [];
-  localSubmissions = [];
-  localResults = [];
-  localFacultyReviews = [];
-  localProctorEvents = [];
-  saveStorage(STORAGE_KEYS.ASSESSMENTS, []);
-  saveStorage(STORAGE_KEYS.SESSIONS, []);
-  saveStorage(STORAGE_KEYS.SUBMISSIONS, []);
-  saveStorage(STORAGE_KEYS.RESULTS, []);
-  saveStorage(STORAGE_KEYS.FACULTY_REVIEWS, []);
-  saveStorage(STORAGE_KEYS.PROCTOR_EVENTS, []);
-  notify(listeners.assessments, []);
-  notify(listeners.sessions, []);
-  notify(listeners.submissions, []);
-  notify(listeners.results, []);
-  notify(listeners.facultyReviews, []);
-  notify(listeners.proctorEvents, []);
-
   try {
     const token = localStorage.getItem('codeguard_token');
-    await fetch(`${API_BASE}/api/admin/clear-assessments-history`, {
+    const response = await fetch(`${API_BASE}/api/admin/clear-assessments-history`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
     });
+    if (!response.ok) return false;
+
+    localAssessments = [];
+    localSessions = [];
+    localSubmissions = [];
+    localResults = [];
+    localFacultyReviews = [];
+    localProctorEvents = [];
+    saveStorage(STORAGE_KEYS.ASSESSMENTS, []);
+    saveStorage(STORAGE_KEYS.SESSIONS, []);
+    saveStorage(STORAGE_KEYS.SUBMISSIONS, []);
+    saveStorage(STORAGE_KEYS.RESULTS, []);
+    saveStorage(STORAGE_KEYS.FACULTY_REVIEWS, []);
+    saveStorage(STORAGE_KEYS.PROCTOR_EVENTS, []);
+    notify(listeners.assessments, []);
+    notify(listeners.sessions, []);
+    notify(listeners.submissions, []);
+    notify(listeners.results, []);
+    notify(listeners.facultyReviews, []);
+    notify(listeners.proctorEvents, []);
     return true;
   } catch {
     return false;
