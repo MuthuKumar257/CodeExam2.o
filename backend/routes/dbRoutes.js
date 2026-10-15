@@ -4,6 +4,7 @@ import { sendError, sendSuccess } from '../utils/response.js';
 import { broadcastDatabaseUpdate } from '../websocket/testSocket.js';
 import { authenticate } from '../middleware/authMiddleware.js';
 import { requireRole } from '../middleware/roleMiddleware.js';
+import { logger } from '../utils/logger.js';
 
 const router = Router();
 
@@ -106,6 +107,47 @@ function buildSupabaseRow(table, id, data) {
       updated_at: new Date().toISOString(),
     };
   }
+  if (table === 'questions') {
+    return {
+      id,
+      title: data.title || '',
+      type: data.type || 'CODING',
+      problem_statement: data.problem_statement || data.problemStatement || data.description || '',
+      input_format: data.input_format || data.inputFormat || '',
+      output_format: data.output_format || data.outputFormat || '',
+      constraints: data.constraints || '',
+      explanation: data.explanation || '',
+      points: Number(data.points || data.marks || 20),
+      difficulty: data.difficulty || 'MEDIUM',
+      tags: Array.isArray(data.tags) ? data.tags : [],
+      starter_code: data.starter_code || data.starterCode || data.boilerplateCode || '',
+      function_signature: data.function_signature || data.functionSignature || {},
+      data,
+      updated_at: new Date().toISOString(),
+    };
+  }
+  if (table === 'assessments' || table === 'tests') {
+    return {
+      id,
+      title: data.title || '',
+      description: data.description || '',
+      instructions: data.instructions || '',
+      duration_minutes: Number(data.duration_minutes || data.durationMinutes || data.duration || 60),
+      start_time: data.start_time || data.startTime || null,
+      end_time: data.end_time || data.endTime || null,
+      max_attempts: Number(data.max_attempts || data.maxAttempts || 1),
+      passing_score: Number(data.passing_score || data.passingScore || 50),
+      maximum_marks: Number(data.maximum_marks || data.maximumMarks || data.totalMarks || 100),
+      status: (data.status || 'ACTIVE').toUpperCase(),
+      faculty_id: data.faculty_id || data.facultyId || data.authorId || '',
+      allowed_languages: Array.isArray(data.allowed_languages || data.allowedLanguages) ? (data.allowed_languages || data.allowedLanguages) : ['python', 'javascript', 'java', 'cpp', 'c'],
+      security_settings: data.security_settings || data.securitySettings || {},
+      risk_weights: data.risk_weights || data.riskWeights || {},
+      data,
+      is_deleted: Boolean(data.is_deleted || data.deleted),
+      updated_at: new Date().toISOString(),
+    };
+  }
   return { ...data, id, data, updated_at: new Date().toISOString() };
 }
 
@@ -116,11 +158,12 @@ function saveInMemory(table, id, data, config) {
   }
   if (!config.memoryKey) return data;
 
+  if (!Array.isArray(memoryStore[config.memoryKey])) {
+    memoryStore[config.memoryKey] = [];
+  }
   const records = memoryStore[config.memoryKey];
   if (data && data.deleted === true) {
-    if (Array.isArray(records)) {
-      memoryStore[config.memoryKey] = records.filter((record) => String(record.id) !== String(id));
-    }
+    memoryStore[config.memoryKey] = records.filter((record) => String(record.id) !== String(id));
     return { id, deleted: true };
   }
 
