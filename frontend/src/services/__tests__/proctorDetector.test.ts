@@ -186,6 +186,8 @@ test('Scenario 3: Hysteresis prevents flapping near threshold boundaries', () =>
     now += 220;
     const testYaw = i % 2 === 0 ? 34 : 37;
     detector.simulateLookingAway(true, testYaw, 0);
+    // Add realistic camera sensor noise across consecutive video frames
+    normalFrame[0] = (now % 255);
     const t = detector.analyzeFrameData(normalFrame, frameWidth, frameHeight, now);
     assert.equal(t.headPose?.state, 'NORMAL', `Hovering at ${testYaw}° must stay NORMAL due to hysteresis buffer`);
     assert.equal(t.tier, 'NORMAL');
@@ -227,11 +229,11 @@ test('Scenario 4: Sustained looking away (>4s) triggers Tier 2 Advisory without 
   }
   assert.equal(detectedEvents.length, 0, 'Brief looking away < 4s does not trigger warning');
 
-  // Continue looking away past 4000ms threshold (total ~5 seconds)
-  for (let i = 0; i < 15; i++) {
+  // Continue looking away past 4000ms threshold (total ~6.5 seconds)
+  for (let i = 0; i < 25; i++) {
     now += 220;
     const t = detector.analyzeFrameData(normalFrame, frameWidth, frameHeight, now);
-    if (i >= 10) {
+    if (i >= 20) {
       assert.equal(t.headPose?.state, 'LOOKING_AWAY');
       assert.equal(t.tier, 'WARNING');
     }

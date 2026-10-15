@@ -55,6 +55,25 @@ interface FrameObservation {
   normalizedBox?: { x: number; y: number; width: number; height: number };
 }
 
+function getGlobalSimulationFlag(flag: string): boolean {
+  if (typeof window !== 'undefined' && window) {
+    return Boolean((window as any)[flag]);
+  }
+  if (typeof globalThis !== 'undefined' && globalThis) {
+    return Boolean((globalThis as any)[flag]);
+  }
+  return false;
+}
+
+function setGlobalSimulationFlag(flag: string, value: boolean) {
+  if (typeof window !== 'undefined' && window) {
+    (window as any)[flag] = value;
+  }
+  if (typeof globalThis !== 'undefined' && globalThis) {
+    (globalThis as any)[flag] = value;
+  }
+}
+
 export class LocalProctorDetector {
   private videoElement: HTMLVideoElement | null = null;
   private canvasElement: HTMLCanvasElement | null = null;
@@ -131,7 +150,7 @@ export class LocalProctorDetector {
     this.phoneConfidenceScore = 0;
     this.lastDetectedPhoneBox = undefined;
     this.phoneSuppressedUntil = 0;
-    (window as any).__SIMULATE_PHONE_DETECTION__ = false;
+    setGlobalSimulationFlag('__SIMULATE_PHONE_DETECTION__', false);
     this.resolveCondition('PHONE_DETECTED');
   }
 
@@ -139,9 +158,9 @@ export class LocalProctorDetector {
    * Simulation test methods for instant manual or automated verification
    */
   public simulateNoFace(enable: boolean = true) {
-    (window as any).__SIMULATE_NO_FACE__ = enable;
+    setGlobalSimulationFlag('__SIMULATE_NO_FACE__', enable);
     if (enable) {
-      (window as any).__SIMULATE_MULTIPLE_PERSONS__ = false;
+      setGlobalSimulationFlag('__SIMULATE_MULTIPLE_PERSONS__', false);
       this.consecutiveNoPersonFrames = 9;
       this.trackingLossStartTime = Date.now() - (this.thresholds.trackingLossGraceMs + 1000);
     } else {
@@ -152,9 +171,9 @@ export class LocalProctorDetector {
   }
 
   public simulateMultipleFaces(enable: boolean = true) {
-    (window as any).__SIMULATE_MULTIPLE_PERSONS__ = enable;
+    setGlobalSimulationFlag('__SIMULATE_MULTIPLE_PERSONS__', enable);
     if (enable) {
-      (window as any).__SIMULATE_NO_FACE__ = false;
+      setGlobalSimulationFlag('__SIMULATE_NO_FACE__', false);
       this.consecutiveMultiplePersonsFrames = 7;
     } else {
       this.consecutiveMultiplePersonsFrames = 0;
@@ -171,7 +190,7 @@ export class LocalProctorDetector {
   }
 
   public simulatePhone(enable: boolean = true) {
-    (window as any).__SIMULATE_PHONE_DETECTION__ = enable;
+    setGlobalSimulationFlag('__SIMULATE_PHONE_DETECTION__', enable);
     if (enable) {
       this.phoneConfidenceScore = 10;
     } else {
@@ -180,9 +199,9 @@ export class LocalProctorDetector {
   }
 
   public resetAllSimulations() {
-    (window as any).__SIMULATE_NO_FACE__ = false;
-    (window as any).__SIMULATE_MULTIPLE_PERSONS__ = false;
-    (window as any).__SIMULATE_PHONE_DETECTION__ = false;
+    setGlobalSimulationFlag('__SIMULATE_NO_FACE__', false);
+    setGlobalSimulationFlag('__SIMULATE_MULTIPLE_PERSONS__', false);
+    setGlobalSimulationFlag('__SIMULATE_PHONE_DETECTION__', false);
     this.simulatedLookingAway = { enabled: false, yaw: 0, pitch: 0 };
     this.phoneConfidenceScore = 0;
     this.lastDetectedPhoneBox = undefined;
@@ -203,7 +222,7 @@ export class LocalProctorDetector {
     this.phoneSuppressedUntil = Date.now() + durationMs;
     this.phoneConfidenceScore = 0;
     this.lastDetectedPhoneBox = undefined;
-    (window as any).__SIMULATE_PHONE_DETECTION__ = false;
+    setGlobalSimulationFlag('__SIMULATE_PHONE_DETECTION__', false);
     this.resolveCondition('PHONE_DETECTED');
   }
 
@@ -213,14 +232,14 @@ export class LocalProctorDetector {
   public suppressMultiplePersons(durationMs: number = 20000) {
     this.multiplePersonsSuppressedUntil = Date.now() + durationMs;
     this.consecutiveMultiplePersonsFrames = 0;
-    (window as any).__SIMULATE_MULTIPLE_PERSONS__ = false;
+    setGlobalSimulationFlag('__SIMULATE_MULTIPLE_PERSONS__', false);
     this.resolveCondition('MULTIPLE_FACES');
   }
 
   public resetMultiPersonState() {
     this.multiplePersonsSuppressedUntil = 0;
     this.consecutiveMultiplePersonsFrames = 0;
-    (window as any).__SIMULATE_MULTIPLE_PERSONS__ = false;
+    setGlobalSimulationFlag('__SIMULATE_MULTIPLE_PERSONS__', false);
     this.resolveCondition('MULTIPLE_FACES');
   }
 
@@ -246,7 +265,7 @@ export class LocalProctorDetector {
       this.canvasCtx = this.canvasElement.getContext('2d', { willReadFrequently: true });
     }
 
-    if (typeof (window as any).FaceDetector === 'function') {
+    if (typeof window !== 'undefined' && typeof (window as any).FaceDetector === 'function') {
       try {
         this.nativeFaceDetector = new (window as any).FaceDetector({ fastMode: true, maxFaces: 5 });
       } catch {
@@ -767,7 +786,7 @@ export class LocalProctorDetector {
       return { detected: false, confidence: 0 };
     }
 
-    if ((window as any).__SIMULATE_PHONE_DETECTION__) {
+    if (getGlobalSimulationFlag('__SIMULATE_PHONE_DETECTION__')) {
       return {
         detected: true,
         box: {
@@ -1002,11 +1021,11 @@ export class LocalProctorDetector {
     width: number,
     height: number
   ): { count: number; box?: BoundingBox; boxes?: BoundingBox[] } {
-    if ((window as any).__SIMULATE_NO_FACE__) {
+    if (getGlobalSimulationFlag('__SIMULATE_NO_FACE__')) {
       return { count: 0 };
     }
 
-    if ((window as any).__SIMULATE_MULTIPLE_PERSONS__) {
+    if (getGlobalSimulationFlag('__SIMULATE_MULTIPLE_PERSONS__')) {
       const b1: BoundingBox = {
         x: Math.round(width * 0.15),
         y: Math.round(height * 0.22),
@@ -1070,7 +1089,14 @@ export class LocalProctorDetector {
         const normR = rgbSum > 0 ? r / rgbSum : 0;
         const normG = rgbSum > 0 ? g / rgbSum : 0;
 
-        const isSkinYCbCr = Y >= 20 && Cb >= 72 && Cb <= 140 && Cr >= 126 && Cr <= 186;
+        const isSkinYCbCr =
+          Y >= 20 &&
+          Cb >= 72 &&
+          Cb <= 140 &&
+          Cr >= 133 &&
+          Cr <= 186 &&
+          Cr > Cb + 4 &&
+          r > g;
         const isSkinRGB =
           r > 35 &&
           g > 20 &&
