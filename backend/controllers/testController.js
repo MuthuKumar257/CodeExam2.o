@@ -76,11 +76,19 @@ export class TestController {
         req.body.candidateName ||
         'Student';
 
+      const studentEmail =
+        req.user?.email ||
+        req.body.student_email ||
+        req.body.studentEmail ||
+        req.body.candidateEmail ||
+        req.body.candidate_email ||
+        null;
+
       if (!studentId) {
         return sendError(res, 'Student ID is required.', 400, 'MISSING_STUDENT_ID');
       }
 
-      const result = await SessionService.startOrRestoreSession(testId, studentId, studentName);
+      const result = await SessionService.startOrRestoreSession(testId, studentId, studentName, null, studentEmail);
       return sendSuccess(
         res,
         result,

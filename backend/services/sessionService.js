@@ -82,7 +82,7 @@ export class SessionService {
     return memoryStore.sessions.filter((s) => s.status === 'ACTIVE');
   }
 
-  static async startOrRestoreSession(testId, studentId, studentName = 'Student', currentTime = null) {
+  static async startOrRestoreSession(testId, studentId, studentName = 'Student', currentTime = null, studentEmail = null) {
     let test = memoryStore.tests.find((t) => t.id === testId && !t.is_deleted);
     if (!test && isSupabaseConfigured && supabase) {
       try {
@@ -99,8 +99,12 @@ export class SessionService {
     const now = currentTime ? new Date(currentTime) : this.getServerTime();
 
     // 1. Session Locking / Resuming: check for existing active session for this student + test FIRST
+    const normalizedEmail = (studentEmail || '').toLowerCase();
     let existingActive = memoryStore.sessions.find(
-      (s) => s.test_id === testId && s.student_id === studentId && (s.status === 'ACTIVE' || s.attempt_status === 'IN_PROGRESS')
+      (s) =>
+        (s.test_id === testId || s.assessmentId === testId) &&
+        (s.student_id === studentId || s.candidateId === studentId || (normalizedEmail && (s.student_email?.toLowerCase() === normalizedEmail || s.candidateEmail?.toLowerCase() === normalizedEmail))) &&
+        (s.status === 'ACTIVE' || s.attempt_status === 'IN_PROGRESS')
     );
 
     if (!existingActive && isSupabaseConfigured && supabase) {
@@ -204,7 +208,12 @@ export class SessionService {
       id: sessionId,
       student_id: studentId,
       student_name: studentName,
+      student_email: studentEmail,
+      candidateId: studentId,
+      candidateName: studentName,
+      candidateEmail: studentEmail,
       test_id: testId,
+      assessmentId: testId,
       test_title: test.title,
       status: 'ACTIVE',
       attempt_status: 'IN_PROGRESS',
@@ -233,7 +242,9 @@ export class SessionService {
           test_id: newSession.test_id,
           assessment_id: newSession.test_id,
           student_id: newSession.student_id,
+          student_email: newSession.student_email,
           candidate_id: newSession.student_id,
+          candidate_email: newSession.student_email,
           candidate_name: newSession.student_name,
           status: newSession.status,
           attempt_status: newSession.attempt_status,

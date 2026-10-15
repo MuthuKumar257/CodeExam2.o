@@ -69,6 +69,7 @@ import {
   auth,
   db,
   ensureAuth,
+  ensureAuthToken,
   getLocalStoredUser,
   setLocalStoredUser,
   deduplicateById,
@@ -499,6 +500,11 @@ export default function App() {
           }
 
           if (session?.user) {
+            if (session.access_token) {
+              localStorage.setItem('codeguard_auth_token', session.access_token);
+            }
+            ensureAuthToken().catch(() => {});
+
             const cached = getLocalStoredUser();
             let resolvedUser: User;
             if (cached && cached.email?.toLowerCase() === session.user.email?.toLowerCase()) {
@@ -737,6 +743,11 @@ export default function App() {
 
     const intervalId = setInterval(() => {
       const now = Date.now();
+      if (candidateStage !== 'DASHBOARD' && candidateStage !== 'FINISHED') {
+        lastActivityRef.current = now;
+        setInactivityWarningSeconds(null);
+        return;
+      }
       const elapsed = now - lastActivityRef.current;
 
       if (elapsed >= TIMEOUT_DURATION_MS) {
@@ -758,7 +769,7 @@ export default function App() {
       clearInterval(intervalId);
       userActivityEvents.forEach((ev) => window.removeEventListener(ev, updateActivity));
     };
-  }, [currentUser]);
+  }, [currentUser, candidateStage]);
 
   // Role switching
   const handleSwitchRole = (role: UserRole) => {
@@ -2470,12 +2481,21 @@ export default function App() {
 
     let authoritativeAttempt: any = null;
     try {
+      const authToken = await ensureAuthToken();
+      const startHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      };
       const startResponse = await fetch(`/api/assessments/${encodeURIComponent(asmId)}/start`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: startHeaders,
         body: JSON.stringify({
           candidateId: studentId,
           candidateName: currentUser.name,
+          candidateEmail: currentUser.email,
+          studentId: studentId,
+          studentName: currentUser.name,
+          studentEmail: currentUser.email,
         }),
       });
       const startPayload = await startResponse.json().catch(() => null);
@@ -2575,21 +2595,6 @@ export default function App() {
         console.warn('[App] Firestore attempt init error:', err)
       );
       await saveSessionToFirestore(newAttempt).catch(() => {});
-
-      // Notify backend API endpoint
-      fetch(`/api/assessments/${asmId}/start`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer token`,
-        },
-        body: JSON.stringify({
-          sessionId: newAttemptId,
-          candidateId: studentId,
-          candidateName: currentUser.name,
-          candidateEmail: currentUser.email,
-        }),
-      }).catch(() => {});
     }
     setCandidateStage('CHECK');
   };

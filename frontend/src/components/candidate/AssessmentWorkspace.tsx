@@ -47,7 +47,7 @@ import { ProctorCamera } from './ProctorCamera';
 import { storeSessionVideo } from '../../services/videoStorage';
 import { saveAttemptToFirestore } from '../../services/firebase';
 import { getCandidateAssignedQuestions, calculateQuestionScore } from '../../utils/submissionUtils';
-import { setAssessmentActiveState } from '../../services/supabaseDatabase';
+import { setAssessmentActiveState, ensureAuthToken } from '../../services/supabaseDatabase';
 import {
   uploadRecordingApi,
   startScreenRecordingApi,
@@ -2257,6 +2257,7 @@ fn main() {
 
   const isHeartbeatInFlightRef = useRef(false);
   const consecutiveHeartbeatFailuresRef = useRef(0);
+  const consecutiveAuthFailuresRef = useRef(0);
 
   // Candidate Heartbeat effect: Pings server watchdog every 12s via HTTP and Socket.IO
   // Heartbeat is used to synchronize server time, remaining seconds, and verify expiration.
@@ -2279,11 +2280,10 @@ fn main() {
       }, 9000);
 
       try {
-        // The API authenticates with the application's signed JWT, issued by
-        // /api/auth/login. Supabase and Firebase tokens are different issuers.
-        const appToken = typeof window !== 'undefined'
-          ? window.localStorage.getItem('codeguard_auth_token')
-          : null;
+        let appToken = await ensureAuthToken().catch(() => null);
+        if (!appToken && typeof window !== 'undefined') {
+          appToken = window.localStorage.getItem('codeguard_auth_token');
+        }
         const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}/heartbeat`, {
           method: 'POST',
           headers: {
@@ -2303,6 +2303,7 @@ fn main() {
 
         if (res.ok) {
           consecutiveHeartbeatFailuresRef.current = 0;
+          consecutiveAuthFailuresRef.current = 0;
           const payload = await res.json().catch(() => null);
           const data = payload?.data || payload;
           if (data?.serverTime) {
@@ -2322,11 +2323,15 @@ fn main() {
         } else {
           consecutiveHeartbeatFailuresRef.current++;
           if (res.status === 401) {
-            // Authentication must be restored through the normal login flow.
-            // Leave the assessment state intact while the student reconnects.
-            console.warn('[AssessmentWorkspace] Heartbeat authentication expired or is missing; assessment remains active.');
-            heartbeatStopped = true;
-            setHeartbeatAuthRequired(true);
+            consecutiveAuthFailuresRef.current++;
+            console.warn(`[AssessmentWorkspace] Heartbeat authentication 401 (failure ${consecutiveAuthFailuresRef.current}/3); attempting silent token refresh...`);
+            // Attempt silent token refresh
+            await ensureAuthToken().catch(() => null);
+            // Only require interactive re-login modal if consecutive auth failures persist (>= 3)
+            if (consecutiveAuthFailuresRef.current >= 3) {
+              heartbeatStopped = true;
+              setHeartbeatAuthRequired(true);
+            }
           } else if (res.status === 409) {
             // The server has authoritatively ended this attempt. Stop both
             // transports; a heartbeat must never revive a terminal session.
@@ -2774,6 +2779,7 @@ fn main() {
               </p>
             </div>
             <AuthScreen onSuccess={() => {
+              consecutiveAuthFailuresRef.current = 0;
               setHeartbeatAuthRequired(false);
               setHeartbeatAuthVersion((version) => version + 1);
               if (socketRef.current) {

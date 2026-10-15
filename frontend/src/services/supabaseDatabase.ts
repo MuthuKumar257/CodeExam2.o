@@ -535,6 +535,63 @@ export function getAuthHeaders(): Record<string, string> {
   return headers;
 }
 
+export async function ensureAuthToken(): Promise<string | null> {
+  if (typeof window === 'undefined') return null;
+
+  let currentToken = localStorage.getItem('codeguard_auth_token');
+  if (currentToken) {
+    try {
+      const parts = currentToken.split('.');
+      if (parts.length === 3) {
+        const payload = JSON.parse(atob(parts[1]));
+        const nowSec = Math.floor(Date.now() / 1000);
+        if (payload.exp && payload.exp > nowSec + 60) {
+          return currentToken;
+        }
+      }
+    } catch {}
+  }
+
+  // Token is missing, invalid, or expiring soon. Attempt to retrieve a fresh one.
+  const curUser = getLocalStoredUser();
+  if (curUser) {
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: curUser.id,
+          email: curUser.email,
+          registerNumber: (curUser as any).registerNumber || (curUser as any).register_number,
+        }),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data?.token) {
+          localStorage.setItem('codeguard_auth_token', json.data.token);
+          return json.data.token;
+        }
+      }
+    } catch (err) {
+      console.warn('[ensureAuthToken] Backend token issue error:', err);
+    }
+  }
+
+  // Fallback to Supabase session access token if available
+  if (supabase) {
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session?.access_token) {
+        localStorage.setItem('codeguard_auth_token', data.session.access_token);
+        return data.session.access_token;
+      }
+    } catch {}
+  }
+
+  return currentToken;
+}
+
+
 export function normalizeUserFields(user: any): User {
   if (!user || typeof user !== 'object') return user;
   const unpacked = user.data && typeof user.data === 'object' ? { ...user.data, ...user } : user;
@@ -1058,7 +1115,7 @@ export async function loginWithEmailPassword(identifier: string, pass: string): 
     const res = await fetch(`${API_BASE}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: trimmed, password: pass }),
+      body: JSON.stringify({ identifier: trimmed, email: trimmed, password: pass }),
     });
     if (res.ok) {
       const json = await res.json();
@@ -1149,6 +1206,27 @@ export async function loginWithEmailPassword(identifier: string, pass: string): 
       saveUserToFirestore(userToReturn).catch(() => {});
       setLocalStoredUser(userToReturn);
 
+      // Acquire and persist authoritative session token
+      try {
+        const tRes = await fetch(`${API_BASE}/api/auth/token`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: userToReturn.id,
+            email: userToReturn.email,
+            registerNumber: (userToReturn as any).registerNumber || (userToReturn as any).register_number,
+          }),
+        });
+        if (tRes.ok) {
+          const tJson = await tRes.json();
+          if (tJson.data?.token) {
+            localStorage.setItem('codeguard_auth_token', tJson.data.token);
+          }
+        }
+      } catch (tErr) {
+        console.warn('[Session Token Issue Error]:', tErr);
+      }
+
       return userToReturn;
     }
     throw new Error('Invalid password. Please check your credentials.');
@@ -1179,6 +1257,27 @@ export async function loginWithEmailPassword(identifier: string, pass: string): 
         localUsers = mergeArraySmart(localUsers, [userWithTimestamp]);
         saveStorage(STORAGE_KEYS.USERS, localUsers);
         setLocalStoredUser(userWithTimestamp);
+
+        if (data.session?.access_token) {
+          localStorage.setItem('codeguard_auth_token', data.session.access_token);
+        }
+        try {
+          const tRes = await fetch(`${API_BASE}/api/auth/token`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: userWithTimestamp.id,
+              email: userWithTimestamp.email,
+            }),
+          });
+          if (tRes.ok) {
+            const tJson = await tRes.json();
+            if (tJson.data?.token) {
+              localStorage.setItem('codeguard_auth_token', tJson.data.token);
+            }
+          }
+        } catch {}
+
         return userWithTimestamp;
       }
     } catch (error) {

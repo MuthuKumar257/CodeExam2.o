@@ -45,11 +45,18 @@ export async function authenticate(req, res, next) {
         try {
           const { data, error: sbErr } = await supabase.auth.getUser(token);
           if (!sbErr && data?.user) {
+            const emailLower = (data.user.email || '').toLowerCase();
+            const appUser = memoryStore.users.find(
+              (u) => (u.email || '').toLowerCase() === emailLower || u.id === data.user.id
+            );
             req.user = {
-              id: data.user.id,
+              id: appUser?.id || data.user.id,
               email: data.user.email,
-              name: data.user.user_metadata?.full_name || data.user.user_metadata?.name || data.user.email,
-              role: (data.user.user_metadata?.role || data.user.app_metadata?.role || 'STUDENT').toUpperCase(),
+              name: appUser?.name || data.user.user_metadata?.full_name || data.user.user_metadata?.name || data.user.email,
+              role: (appUser?.role || data.user.user_metadata?.role || data.user.app_metadata?.role || 'STUDENT').toUpperCase(),
+              register_number: appUser?.register_number || appUser?.registerNumber || appUser?.registerNo,
+              department: appUser?.department,
+              supabase_uid: data.user.id,
             };
             return next();
           }
@@ -102,11 +109,18 @@ export async function optionalAuthenticate(req, res, next) {
         try {
           const { data } = await supabase.auth.getUser(token);
           if (data?.user) {
+            const emailLower = (data.user.email || '').toLowerCase();
+            const appUser = memoryStore.users.find(
+              (u) => (u.email || '').toLowerCase() === emailLower || u.id === data.user.id
+            );
             req.user = {
-              id: data.user.id,
+              id: appUser?.id || data.user.id,
               email: data.user.email,
-              name: data.user.user_metadata?.name || data.user.email,
-              role: (data.user.user_metadata?.role || data.user.app_metadata?.role || 'STUDENT').toUpperCase(),
+              name: appUser?.name || data.user.user_metadata?.name || data.user.email,
+              role: (appUser?.role || data.user.user_metadata?.role || data.user.app_metadata?.role || 'STUDENT').toUpperCase(),
+              register_number: appUser?.register_number || appUser?.registerNumber || appUser?.registerNo,
+              department: appUser?.department,
+              supabase_uid: data.user.id,
             };
             return next();
           }

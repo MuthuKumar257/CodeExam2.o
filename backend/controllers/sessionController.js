@@ -38,13 +38,14 @@ export class SessionController {
 
   static async createOrRestoreSession(req, res, next) {
     try {
-      const { test_id, testId, student_id, studentId, student_name, studentName } = req.body;
+      const { test_id, testId, student_id, studentId, student_name, studentName, student_email, studentEmail, candidateEmail } = req.body;
       const targetTestId = test_id || testId;
       const requestedStudentId = student_id || studentId;
       const isStudent = isStudentUser(req.user);
 
       let targetStudentId = requestedStudentId || req.user?.id;
       let targetName = student_name || studentName || req.user?.name || 'Student';
+      let targetEmail = student_email || studentEmail || candidateEmail || req.user?.email || null;
 
       if (isStudent) {
         if (requestedStudentId && requestedStudentId !== req.user.id && requestedStudentId !== req.user.email) {
@@ -52,13 +53,14 @@ export class SessionController {
         }
         targetStudentId = req.user.id;
         targetName = req.user.name || 'Student';
+        targetEmail = req.user.email || targetEmail;
       }
 
       if (!targetTestId || !targetStudentId) {
         return sendError(res, 'Test ID and Student ID are required.', 400, 'MISSING_FIELDS');
       }
 
-      const result = await SessionService.startOrRestoreSession(targetTestId, targetStudentId, targetName);
+      const result = await SessionService.startOrRestoreSession(targetTestId, targetStudentId, targetName, null, targetEmail);
       return sendSuccess(
         res,
         result.session,
@@ -79,8 +81,13 @@ export class SessionController {
       const isStudent = isStudentUser(req.user);
       if (isStudent) {
         const ownerId = session.student_id || session.candidateId;
-        const ownerEmail = session.student_email || session.candidateEmail;
-        if (ownerId !== req.user.id && ownerEmail !== req.user.email) {
+        const ownerEmail = (session.student_email || session.candidateEmail || '').toLowerCase();
+        const userEmail = (req.user.email || '').toLowerCase();
+        const isOwner =
+          ownerId === req.user.id ||
+          (ownerEmail && userEmail && ownerEmail === userEmail) ||
+          (ownerId && userEmail && ownerId.toLowerCase() === userEmail);
+        if (!isOwner) {
           return sendError(res, 'Access denied. You can only access your own session.', 403, 'FORBIDDEN', req.requestId);
         }
       }
@@ -110,13 +117,21 @@ export class SessionController {
         return sendError(res, 'Session not found.', 404, 'NOT_FOUND');
       }
       const isStudent = isStudentUser(req.user);
-      if (!isStudent) {
+      if (!isStudent && req.user.role !== 'ADMIN' && req.user.role !== 'FACULTY') {
         logger.warn(`[${req.requestId || 'NO_REQUEST_ID'}] Heartbeat rejected: authenticated_user_not_student.`);
         return sendError(res, 'Only the student who owns this session can send its heartbeat.', 403, 'FORBIDDEN', req.requestId);
       }
       const ownerId = session.student_id || session.candidateId;
-      const ownerEmail = session.student_email || session.candidateEmail;
-      if (ownerId !== req.user.id && ownerEmail !== req.user.email) {
+      const ownerEmail = (session.student_email || session.candidateEmail || '').toLowerCase();
+      const userEmail = (req.user.email || '').toLowerCase();
+      const isOwner =
+        ownerId === req.user.id ||
+        (ownerEmail && userEmail && ownerEmail === userEmail) ||
+        (ownerId && userEmail && ownerId.toLowerCase() === userEmail) ||
+        (req.user.register_number && (session.candidateRegisterNo === req.user.register_number || session.student_id === req.user.register_number)) ||
+        req.user.role === 'ADMIN';
+
+      if (!isOwner) {
         logger.warn(`[${req.requestId || 'NO_REQUEST_ID'}] Heartbeat rejected: session_owner_mismatch.`);
         return sendError(res, 'Access denied. You can only update heartbeat for your own session.', 403, 'FORBIDDEN', req.requestId);
       }
@@ -141,8 +156,16 @@ export class SessionController {
       const isStudent = isStudentUser(req.user);
       if (isStudent) {
         const ownerId = existing.student_id || existing.candidateId;
-        const ownerEmail = existing.student_email || existing.candidateEmail;
-        if (ownerId !== req.user.id && ownerEmail !== req.user.email) {
+        const ownerEmail = (existing.student_email || existing.candidateEmail || '').toLowerCase();
+        const userEmail = (req.user.email || '').toLowerCase();
+        const isOwner =
+          ownerId === req.user.id ||
+          (ownerEmail && userEmail && ownerEmail === userEmail) ||
+          (ownerId && userEmail && ownerId.toLowerCase() === userEmail) ||
+          (req.user.register_number && (existing.candidateRegisterNo === req.user.register_number || existing.student_id === req.user.register_number)) ||
+          req.user.role === 'ADMIN';
+
+        if (!isOwner) {
           return sendError(res, 'Access denied. You can only submit your own session.', 403, 'FORBIDDEN', req.requestId);
         }
       }
