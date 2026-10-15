@@ -105,11 +105,23 @@ export const FacultyAssessmentsPage: React.FC<FacultyAssessmentsPageProps> = ({
   const getEnrolledCount = (asm: Assessment) => {
     if (asm.classId) {
       const cls = classes.find((c) => c.id === asm.classId);
-      if (cls && Array.isArray(cls.studentIds) && cls.studentIds.length > 0) {
-        return cls.studentIds.length;
+      if (cls) {
+        const cStudentIds = [
+          ...(cls.studentIds || []),
+          ...((cls as any).student_ids || []),
+          ...((cls as any).data?.studentIds || []),
+          ...((cls as any).data?.student_ids || []),
+        ];
+        if (cStudentIds.length > 0) return new Set(cStudentIds).size;
       }
     }
-    return asm.candidateIds?.length || 0;
+    const explicitCandidates = [
+      ...(asm.candidateIds || []),
+      ...((asm as any).candidate_ids || []),
+      ...((asm as any).data?.candidateIds || []),
+    ];
+    if (explicitCandidates.length > 0) return new Set(explicitCandidates).size;
+    return users.filter(isStudentUser).length;
   };
 
   // Helper to get sessions for an assessment

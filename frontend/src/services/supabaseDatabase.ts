@@ -537,15 +537,53 @@ export function getAuthHeaders(): Record<string, string> {
 
 export function normalizeUserFields(user: any): User {
   if (!user || typeof user !== 'object') return user;
-  const rawReg = user.registerNumber ?? user.register_number ?? user.registerNo ?? user.rollNumber;
+  const unpacked = user.data && typeof user.data === 'object' ? { ...user.data, ...user } : user;
+  const rawReg = unpacked.registerNumber ?? unpacked.register_number ?? unpacked.registerNo ?? unpacked.rollNumber;
   const regNumber = rawReg !== undefined && rawReg !== null ? String(rawReg).trim() : '';
+  const classIds = Array.isArray(unpacked.classIds)
+    ? unpacked.classIds
+    : Array.isArray(unpacked.class_ids)
+    ? unpacked.class_ids
+    : [];
 
   return {
-    ...user,
+    ...unpacked,
     registerNumber: regNumber,
     registerNo: regNumber,
     register_number: regNumber,
-    email: user.email ? String(user.email).trim().toLowerCase() : '',
+    classIds,
+    class_ids: classIds,
+    email: unpacked.email ? String(unpacked.email).trim().toLowerCase() : '',
+  };
+}
+
+export function normalizeClassFields(cls: any): Classroom {
+  if (!cls || typeof cls !== 'object') return cls;
+  const unpacked = cls.data && typeof cls.data === 'object' ? { ...cls.data, ...cls } : cls;
+  const studentIds = Array.isArray(unpacked.studentIds)
+    ? unpacked.studentIds
+    : Array.isArray(unpacked.student_ids)
+    ? unpacked.student_ids
+    : [];
+  const staffIds = Array.isArray(unpacked.staffIds)
+    ? unpacked.staffIds
+    : Array.isArray(unpacked.staff_ids)
+    ? unpacked.staff_ids
+    : [];
+  const facultyIds = Array.isArray(unpacked.facultyIds)
+    ? unpacked.facultyIds
+    : Array.isArray(unpacked.faculty_ids)
+    ? unpacked.faculty_ids
+    : staffIds;
+
+  return {
+    ...unpacked,
+    studentIds,
+    student_ids: studentIds,
+    staffIds,
+    staff_ids: staffIds,
+    facultyIds,
+    faculty_ids: facultyIds,
   };
 }
 
@@ -605,7 +643,8 @@ export async function fetchModularClasses(): Promise<void> {
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
-      localClasses = deduplicateById(json.data.filter((c: any) => !LEGACY_DEMO_CLASS_IDS.has(c.id)));
+      const serverClasses = json.data.map(normalizeClassFields);
+      localClasses = deduplicateById(serverClasses.filter((c: any) => !LEGACY_DEMO_CLASS_IDS.has(c.id)));
       saveStorage(STORAGE_KEYS.CLASSES, localClasses);
       notify(listeners.classes, localClasses);
     }

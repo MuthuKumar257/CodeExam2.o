@@ -492,7 +492,7 @@ export const CreateAssessment: React.FC<CreateAssessmentProps> = ({
                 {classes.length > 0 ? (
                   classes.map((cls) => (
                     <option key={cls.id} value={cls.id}>
-                      {cls.name} ({cls.studentIds.length} enrolled candidates)
+                      {cls.name} ({(cls.studentIds?.length || (cls as any).student_ids?.length || (cls as any).student_count || 0)} enrolled candidates)
                     </option>
                   ))
                 ) : (

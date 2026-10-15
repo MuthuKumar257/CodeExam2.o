@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { compressAvatarImage } from './utils/imageCompressor';
 import { Socket } from 'socket.io-client';
 import { createResilientSocket } from './services/socketClient';
-import { isStudentUser } from './utils/classUtils';
+import { isStudentUser, isFacultyAssignedToClass } from './utils/classUtils';
 
 import { Header } from './components/common/Header';
 import { Sidebar } from './components/common/Sidebar';
@@ -3367,7 +3367,7 @@ export default function App() {
 
           {/* FACULTY VIEWS */}
           {currentUser.role === 'FACULTY' && (() => {
-            const myClasses = classes.filter((c) => (c.staffIds && c.staffIds.includes(currentUser.id)) || (c.facultyIds && c.facultyIds.includes(currentUser.id)));
+            const myClasses = classes.filter((c) => isFacultyAssignedToClass(c, currentUser));
             const availableClasses = myClasses.length > 0 ? myClasses : classes;
             const currentClassId = (selectedClassId && availableClasses.some((c) => c.id === selectedClassId))
               ? selectedClassId
@@ -3375,7 +3375,14 @@ export default function App() {
             const activeClassObj = availableClasses.find((c) => c.id === currentClassId) || null;
 
             // Filter assessments & sessions by classroom
-            const classStudentIds = activeClassObj ? (activeClassObj.studentIds || []) : [];
+            const classStudentIds = activeClassObj
+              ? [
+                  ...(activeClassObj.studentIds || []),
+                  ...((activeClassObj as any).student_ids || []),
+                  ...((activeClassObj as any).data?.studentIds || []),
+                  ...((activeClassObj as any).data?.student_ids || []),
+                ]
+              : [];
             const filteredAssessments = assessments.filter((a) => {
               if (currentClassId && a.classId === currentClassId) return true;
               if (!a.classId && a.facultyId === currentUser.id) return true;

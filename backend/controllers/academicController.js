@@ -14,6 +14,37 @@ if (!memoryStore.deletedDepartmentIds) memoryStore.deletedDepartmentIds = new Se
 if (!memoryStore.deletedInstitutionIds) memoryStore.deletedInstitutionIds = new Set();
 
 
+function normalizeClassRow(c) {
+  if (!c || typeof c !== 'object') return c;
+  const inner = c.data && typeof c.data === 'object' ? { ...c.data, ...c } : c;
+  const studentIds = Array.isArray(inner.studentIds)
+    ? inner.studentIds
+    : Array.isArray(inner.student_ids)
+    ? inner.student_ids
+    : [];
+  const staffIds = Array.isArray(inner.staffIds)
+    ? inner.staffIds
+    : Array.isArray(inner.staff_ids)
+    ? inner.staff_ids
+    : [];
+  const facultyIds = Array.isArray(inner.facultyIds)
+    ? inner.facultyIds
+    : Array.isArray(inner.faculty_ids)
+    ? inner.faculty_ids
+    : staffIds;
+  return {
+    ...inner,
+    studentIds,
+    student_ids: studentIds,
+    staffIds,
+    staff_ids: staffIds,
+    facultyIds,
+    faculty_ids: facultyIds,
+    student_count: studentIds.length || Number(inner.student_count || inner.studentCount || 0),
+    studentCount: studentIds.length || Number(inner.student_count || inner.studentCount || 0),
+  };
+}
+
 export class AcademicController {
   // CLASSES
   static async getClasses(req, res, next) {
@@ -22,7 +53,7 @@ export class AcademicController {
       const p = Math.max(1, Number(page));
       const l = Math.max(1, Number(limit));
 
-      let list = (memoryStore.classes || []).filter((c) => !memoryStore.deletedClassIds?.has(c.id));
+      let list = (memoryStore.classes || []).map(normalizeClassRow).filter((c) => !memoryStore.deletedClassIds?.has(c.id));
       if (department) list = list.filter((c) => c.department === department);
 
       if (isSupabaseConfigured && supabase) {
@@ -33,7 +64,7 @@ export class AcademicController {
           const to = from + l - 1;
           const { data, count, error } = await query.range(from, to);
           if (!error && Array.isArray(data) && data.length > 0) {
-            const filteredData = data.filter((c) => !memoryStore.deletedClassIds?.has(c.id));
+            const filteredData = data.map(normalizeClassRow).filter((c) => !memoryStore.deletedClassIds?.has(c.id));
             const total = count ?? filteredData.length;
             return sendPaginated(res, filteredData, { page: p, limit: l, total, hasMore: p * l < total }, 'Classes retrieved.');
           }
@@ -50,9 +81,15 @@ export class AcademicController {
 
   static async getClassById(req, res, next) {
     try {
-      const found = (memoryStore.classes || []).find((c) => c.id === req.params.id);
+      let found = (memoryStore.classes || []).find((c) => c.id === req.params.id);
+      if (!found && isSupabaseConfigured && supabase) {
+        try {
+          const { data } = await supabase.from('classes').select('*').eq('id', req.params.id).maybeSingle();
+          if (data) found = data;
+        } catch {}
+      }
       if (!found) return sendError(res, 'Class not found.', 404, 'NOT_FOUND');
-      return sendSuccess(res, found);
+      return sendSuccess(res, normalizeClassRow(found));
     } catch (err) {
       next(err);
     }

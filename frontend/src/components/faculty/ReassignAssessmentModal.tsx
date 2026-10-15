@@ -38,7 +38,7 @@ import {
   Settings2,
 } from 'lucide-react';
 import { Assessment, Classroom, User, AssessmentStatus, SecuritySettings, Question } from '../../types';
-import { isStudentUser } from '../../utils/classUtils';
+import { isStudentUser, isStudentAssignedToClass } from '../../utils/classUtils';
 
 interface ReassignAssessmentModalProps {
   assessment: Assessment | null;
@@ -155,11 +155,7 @@ export const ReassignAssessmentModal: React.FC<ReassignAssessmentModalProps> = (
     const cls = classes.find((c) => c.id === targetClassId);
     if (!cls) return candidateUsers;
 
-    return candidateUsers.filter((u) => {
-      const inClsStudentIds = cls.studentIds && cls.studentIds.includes(u.id);
-      const inUserClassIds = u.classIds && u.classIds.includes(targetClassId);
-      return inClsStudentIds || inUserClassIds;
-    });
+    return candidateUsers.filter((u) => isStudentAssignedToClass(cls, u));
   }, [targetClassId, classes, candidateUsers]);
 
   // Handle Security Toggle with Master Camera & Mic Cascading Logic
@@ -574,8 +570,9 @@ export const ReassignAssessmentModal: React.FC<ReassignAssessmentModalProps> = (
 
                   {classes.map((cls) => {
                     const studentCount =
+                      candidateUsers.filter((u) => isStudentAssignedToClass(cls, u)).length ||
                       cls.studentIds?.length ||
-                      candidateUsers.filter((u) => u.classIds?.includes(cls.id)).length ||
+                      (cls as any).student_ids?.length ||
                       0;
                     const isCurrent = cls.id === assessment.classId;
 

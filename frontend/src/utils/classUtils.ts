@@ -7,8 +7,20 @@ export function isStudentUser(user: User | null | undefined): boolean {
 
 export function isStudentAssignedToClass(cls: Classroom, stu: User): boolean {
   if (!cls || !stu) return false;
-  const cStudentIds = (cls.studentIds || []).map((id) => String(id).trim().toLowerCase());
-  const sClassIds = (stu.classIds || []).map((id) => String(id).trim().toLowerCase());
+  const cStudentIds = [
+    ...(cls.studentIds || []),
+    ...((cls as any).student_ids || []),
+    ...((cls as any).data?.studentIds || []),
+    ...((cls as any).data?.student_ids || []),
+  ].map((id) => String(id).trim().toLowerCase());
+
+  const sClassIds = [
+    ...(stu.classIds || []),
+    ...((stu as any).class_ids || []),
+    ...((stu as any).data?.classIds || []),
+    ...((stu as any).data?.class_ids || []),
+  ].map((id) => String(id).trim().toLowerCase());
+
   const clsIdLower = String(cls.id || '').trim().toLowerCase();
   const clsNameLower = String(cls.name || (cls as any).className || '').trim().toLowerCase();
 
@@ -20,6 +32,7 @@ export function isStudentAssignedToClass(cls: Classroom, stu: User): boolean {
   if (stu.uid && cStudentIds.includes(String(stu.uid).trim().toLowerCase())) return true;
   if (stu.registerNumber && cStudentIds.includes(String(stu.registerNumber).trim().toLowerCase())) return true;
   if (stu.registerNo && cStudentIds.includes(String(stu.registerNo).trim().toLowerCase())) return true;
+  if ((stu as any).register_number && cStudentIds.includes(String((stu as any).register_number).trim().toLowerCase())) return true;
   if (stu.email && cStudentIds.includes(String(stu.email).trim().toLowerCase())) return true;
 
   // 3. Match by student className or classroom property if stored on user
@@ -31,10 +44,25 @@ export function isStudentAssignedToClass(cls: Classroom, stu: User): boolean {
 
 export function isFacultyAssignedToClass(cls: Classroom, fac: User): boolean {
   if (!cls || !fac) return false;
-  const cStaffIds = (cls.staffIds || []).map((id) => String(id).trim().toLowerCase());
-  const cFacultyIds = (cls.facultyIds || []).map((id) => String(id).trim().toLowerCase());
+  const cStaffIds = [
+    ...(cls.staffIds || []),
+    ...((cls as any).staff_ids || []),
+    ...((cls as any).data?.staffIds || []),
+    ...((cls as any).data?.staff_ids || []),
+  ].map((id) => String(id).trim().toLowerCase());
+  const cFacultyIds = [
+    ...(cls.facultyIds || []),
+    ...((cls as any).faculty_ids || []),
+    ...((cls as any).data?.facultyIds || []),
+    ...((cls as any).data?.faculty_ids || []),
+  ].map((id) => String(id).trim().toLowerCase());
   const allStaffIds = [...cStaffIds, ...cFacultyIds];
-  const fClassIds = (fac.classIds || []).map((id) => String(id).trim().toLowerCase());
+  const fClassIds = [
+    ...(fac.classIds || []),
+    ...((fac as any).class_ids || []),
+    ...((fac as any).data?.classIds || []),
+    ...((fac as any).data?.class_ids || []),
+  ].map((id) => String(id).trim().toLowerCase());
   const clsIdLower = String(cls.id || '').trim().toLowerCase();
   const clsNameLower = String(cls.name || (cls as any).className || '').trim().toLowerCase();
 

@@ -597,14 +597,22 @@ export class UserService {
 
     // Helper to normalize user fields
     const normalizeUser = (u) => {
-      const { password: _, ...safe } = u;
+      const unpacked = u.data && typeof u.data === 'object' ? { ...u.data, ...u } : u;
+      const { password: _, ...safe } = unpacked;
       const rawReg = safe.register_number ?? safe.registerNumber ?? safe.registerNo ?? safe.rollNumber;
       const reg = rawReg !== undefined && rawReg !== null ? String(rawReg).trim() : '';
+      const cIds = Array.isArray(safe.classIds)
+        ? safe.classIds
+        : Array.isArray(safe.class_ids)
+        ? safe.class_ids
+        : [];
       return {
         ...safe,
         register_number: reg,
         registerNumber: reg,
         registerNo: reg,
+        class_ids: cIds,
+        classIds: cIds,
       };
     };
 

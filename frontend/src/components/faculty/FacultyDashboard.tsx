@@ -3,7 +3,7 @@ import { Video, PlusCircle, CheckCircle, Key, Unlock, Trash2, Loader2, PlayCircl
 import { Assessment, CandidateSession, Classroom, Question, Result, Submission, User } from '../../types';
 import { StudentRankingView } from '../common/StudentRankingView';
 import { ReassignAssessmentModal } from './ReassignAssessmentModal';
-import { isStudentUser } from '../../utils/classUtils';
+import { isStudentUser, isStudentAssignedToClass } from '../../utils/classUtils';
 
 interface FacultyDashboardProps {
   assessments: Assessment[];
@@ -141,6 +141,30 @@ export const FacultyDashboard: React.FC<FacultyDashboardProps> = ({
       .filter(Boolean),
   ]).size;
 
+  const getEnrolledCandidatesCount = (asm: Assessment) => {
+    if (asm.classId) {
+      const cls = classes.find((c) => c.id === asm.classId);
+      if (cls) {
+        const clsStudents = users.filter((u) => isStudentUser(u) && isStudentAssignedToClass(cls, u));
+        if (clsStudents.length > 0) return clsStudents.length;
+        const cStudentIds = [
+          ...(cls.studentIds || []),
+          ...((cls as any).student_ids || []),
+          ...((cls as any).data?.studentIds || []),
+          ...((cls as any).data?.student_ids || []),
+        ];
+        if (cStudentIds.length > 0) return new Set(cStudentIds).size;
+      }
+    }
+    const explicitCandidates = [
+      ...(asm.candidateIds || []),
+      ...((asm as any).candidate_ids || []),
+      ...((asm as any).data?.candidateIds || []),
+    ];
+    if (explicitCandidates.length > 0) return new Set(explicitCandidates).size;
+    return users.filter(isStudentUser).length;
+  };
+
   return (
     <div className="p-6 space-y-6">
       {/* Top Banner */}
@@ -254,7 +278,7 @@ export const FacultyDashboard: React.FC<FacultyDashboardProps> = ({
                         </span>
                       )}
                     </td>
-                    <td className="p-3">{new Set(asm.candidateIds || []).size} Enrolled</td>
+                    <td className="p-3">{getEnrolledCandidatesCount(asm)} Enrolled</td>
                     <td className="p-3">
                       {effectiveStatus === 'ACTIVE' ? (
                         <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1 w-fit">
