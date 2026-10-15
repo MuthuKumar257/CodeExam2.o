@@ -57,6 +57,11 @@ router.post('/:recordingId/finalize', async (req, res, next) => {
       duration: recording.duration,
       playbackUrl: recording.playbackUrl,
       chunkCount: recording.chunkCount,
+      driveFileId: recording.driveFileId,
+      driveFolderId: recording.driveFolderId,
+      driveViewUrl: recording.driveViewUrl,
+      isDriveVerified: Boolean(recording.isDriveVerified),
+      uploadStatus: recording.uploadStatus,
     });
   } catch (error) {
     return next(error);
@@ -70,6 +75,11 @@ router.post('/upload', upload.single('recording'), async (req, res, next) => {
     return sendSuccess(res, {
       recording,
       streamUrl: recording.playbackUrl,
+      driveFileId: recording.driveFileId,
+      driveFolderId: recording.driveFolderId,
+      driveViewUrl: recording.driveViewUrl,
+      isDriveVerified: Boolean(recording.isDriveVerified),
+      uploadStatus: recording.uploadStatus,
     }, 'Recording uploaded.', 201);
   } catch (error) {
     return next(error);
@@ -85,12 +95,17 @@ router.get('/stream/:recordingId', async (req, res, next) => {
     const recording = await getRecording(req.params.recordingId);
     if (!recording) return sendError(res, 'Recording not found.', 404, 'RECORDING_NOT_FOUND');
     const range = req.headers.range;
-    const fullEnd = recording.sizeBytes - 1;
+    const fullEnd = (recording.sizeBytes || 1) - 1;
     const match = range?.match(/bytes=(\d*)-(\d*)/);
     const start = match?.[1] ? Number(match[1]) : 0;
     const end = match?.[2] ? Number(match[2]) : fullEnd;
     const result = await readRecordingRange(req.params.recordingId, start, end);
-    if (!result) return sendError(res, 'Recording file is unavailable.', 404, 'RECORDING_FILE_NOT_FOUND');
+    if (!result) {
+      if (recording.driveViewUrl) {
+        return res.redirect(recording.driveViewUrl);
+      }
+      return sendError(res, 'Recording file is unavailable.', 404, 'RECORDING_FILE_NOT_FOUND');
+    }
     res.status(match ? 206 : 200);
     res.set({
       'Content-Type': recording.mimeType || 'video/webm',

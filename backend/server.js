@@ -21,6 +21,7 @@ import monitoringRoutes from './routes/monitoringRoutes.js';
 import settingsRoutes from './routes/settingsRoutes.js';
 import dbRoutes from './routes/dbRoutes.js';
 import recordingRoutes, { registerRecordingLookups } from './routes/recordingRoutes.js';
+import driveRoutes from './routes/driveRoutes.js';
 import { classesRouter, departmentsRouter, institutionsRouter } from './routes/academicRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 
@@ -44,7 +45,17 @@ const allowedFrontendOrigins = (process.env.FRONTEND_URLS || process.env.FRONTEN
 
 app.use(
   cors({
-    origin: allowedFrontendOrigins,
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (
+        allowedFrontendOrigins.includes(origin) ||
+        origin.endsWith('.vercel.app') ||
+        origin.includes('localhost')
+      ) {
+        return callback(null, true);
+      }
+      return callback(null, true);
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id', 'x-user-role'],
@@ -58,7 +69,7 @@ app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 
 // Health and server-time endpoints
-app.get(['/api/health', '/health'], (_req, res) => {
+app.all(['/', '/api/health', '/health'], (_req, res) => {
   return res.status(200).json({
     success: true,
     status: 'healthy',
@@ -163,6 +174,7 @@ app.use(['/api/live-monitoring', '/api/monitoring'], monitoringRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/db', dbRoutes);
 app.use('/api/recordings', recordingRoutes);
+app.use('/api/drive', driveRoutes);
 registerRecordingLookups(app);
 
 // Error Handling Middleware
@@ -175,12 +187,13 @@ app.use(errorMiddleware);
 const server = http.createServer(app);
 const io = new SocketIOServer(server, {
   cors: {
-    origin: allowedFrontendOrigins,
+    origin: (origin, callback) => callback(null, true),
     methods: ['GET', 'POST'],
+    credentials: true,
   },
-  pingTimeout: 10000,
-  pingInterval: 5000,
-  transports: ['polling', 'websocket'],
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  transports: ['websocket', 'polling'],
 });
 
 setupWebSocket(io);
