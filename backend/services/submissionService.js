@@ -237,9 +237,10 @@ export class SubmissionService {
         if (supabaseSubmissionsAvailable) {
           try {
             await supabase.from('sessions').update({
-              score: session.score,
-              total_marks: session.total_marks,
-              updated_at: session.updated_at
+              final_score: session.score,
+              total_points: session.total_marks,
+              updated_at: session.updated_at,
+              data: session,
             }).eq('id', sessionId);
           } catch (sessionErr) {
             logger.warn('Failed to update session score in Supabase:', sessionErr.message);
@@ -251,7 +252,27 @@ export class SubmissionService {
     if (supabaseSubmissionsAvailable) {
       const databaseStarted = Date.now();
       try {
-        const { error } = await supabase.from('submissions').upsert(newSubmission);
+        const sbSubmissionRow = {
+          id: newSubmission.id,
+          attempt_id: newSubmission.session_id,
+          session_id: newSubmission.session_id,
+          test_id: newSubmission.test_id,
+          assessment_id: newSubmission.test_id,
+          student_id: newSubmission.student_id,
+          question_id: newSubmission.question_id,
+          language: newSubmission.language,
+          source_code: newSubmission.code,
+          status: newSubmission.status,
+          score: newSubmission.score,
+          max_score: newSubmission.max_score,
+          test_cases_passed: newSubmission.passed_count,
+          total_test_cases: newSubmission.total_testcases,
+          execution_time_ms: newSubmission.execution_metrics?.executionTime || 0,
+          test_case_results: newSubmission.testcase_results || [],
+          data: newSubmission,
+          submitted_at: newSubmission.submitted_at,
+        };
+        const { error } = await supabase.from('submissions').upsert(sbSubmissionRow);
         if (error) throw error;
         newSubmission.execution_metrics.databaseTime = Date.now() - databaseStarted;
       } catch (err) {

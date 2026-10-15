@@ -58,14 +58,27 @@ export class AdminController {
       const updated = {
         ...memoryStore.settings,
         ...req.body,
+        id: memoryStore.settings?.id || req.body?.id || 'default',
         updated_at: new Date().toISOString(),
       };
       memoryStore.settings = updated;
 
       if (isSupabaseConfigured && supabase) {
         try {
-          await supabase.from('settings').upsert(updated);
-        } catch {}
+          await supabase.from('settings').upsert({
+            id: updated.id,
+            institution_name: updated.institution_name,
+            allow_registrations: updated.allow_registrations,
+            maintenance_mode: updated.maintenance_mode,
+            session_timeout_minutes: updated.session_timeout_minutes,
+            data: updated,
+            updated_at: updated.updated_at,
+          });
+        } catch (sErr) {
+          try {
+            await supabase.from('settings').upsert(updated);
+          } catch {}
+        }
       }
 
       return sendSuccess(res, updated, 'System settings updated.');

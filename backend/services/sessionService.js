@@ -28,7 +28,7 @@ export class SessionService {
       try {
         const { data, error } = await supabase.from('sessions').select('*').eq('id', sessionId).maybeSingle();
         if (!error && data) {
-          session = data;
+          session = data.data && typeof data.data === 'object' ? { ...data.data, ...data } : data;
           memoryStore.sessions.push(session);
         }
       } catch (err) {
@@ -113,7 +113,7 @@ export class SessionService {
           .eq('status', 'ACTIVE')
           .maybeSingle();
         if (data) {
-          existingActive = data;
+          existingActive = data.data && typeof data.data === 'object' ? { ...data.data, ...data } : data;
           memoryStore.sessions.push(existingActive);
         }
       } catch {}
@@ -228,7 +228,24 @@ export class SessionService {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        const { error } = await supabase.from('sessions').upsert(newSession);
+        const { error } = await supabase.from('sessions').upsert({
+          id: newSession.id,
+          test_id: newSession.test_id,
+          assessment_id: newSession.test_id,
+          student_id: newSession.student_id,
+          candidate_id: newSession.student_id,
+          candidate_name: newSession.student_name,
+          status: newSession.status,
+          attempt_status: newSession.attempt_status,
+          started_at: newSession.started_at,
+          last_heartbeat: newSession.last_heartbeat,
+          last_seen_at: newSession.last_seen_at,
+          final_score: newSession.score,
+          total_points: newSession.total_marks,
+          data: newSession,
+          created_at: newSession.created_at,
+          updated_at: newSession.updated_at,
+        });
         if (error) throw error;
       } catch (err) {
         logger.warn('Supabase create session fallback:', err.message);
@@ -296,8 +313,8 @@ export class SessionService {
         .update({
           last_heartbeat: nowIso,
           last_seen_at: nowIso,
-          connection_status: 'connected',
           updated_at: nowIso,
+          data: session,
           ...(isExpired ? { status: 'EXPIRED', attempt_status: 'AUTO_SUBMITTED', submitted_at: nowIso, completed_at: nowIso } : {}),
         })
         .eq('id', sessionId)
@@ -397,13 +414,14 @@ export class SessionService {
     if (isSupabaseConfigured && supabase) {
       try {
         const { error } = await supabase.from('sessions').update({
-          score: session.score,
-          total_marks: session.total_marks,
-          percentage: session.percentage,
+          final_score: session.score,
+          total_points: session.total_marks,
           status: 'SUBMITTED',
+          attempt_status: 'SUBMITTED',
           submitted_at: now,
           completed_at: now,
           updated_at: now,
+          data: session,
         }).eq('id', sessionId);
         if (error) throw error;
       } catch (err) {
@@ -487,13 +505,14 @@ export class SessionService {
     if (isSupabaseConfigured && supabase) {
       try {
         const { error } = await supabase.from('sessions').update({
-          score: session.score,
-          total_marks: session.total_marks,
-          percentage: session.percentage,
+          final_score: session.score,
+          total_points: session.total_marks,
           status: 'EXPIRED',
+          attempt_status: 'AUTO_SUBMITTED',
           submitted_at: session.submitted_at,
           completed_at: session.completed_at,
           updated_at: now,
+          data: session,
         }).eq('id', sessionId);
         if (error) throw error;
       } catch (err) {

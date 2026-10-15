@@ -254,25 +254,37 @@ export async function syncFromSupabaseOnStartup() {
       ['assessments', 'tests'],
       ['classes', 'classes'],
       ['departments', 'departments'],
+      ['institutions', 'institutions'],
       ['questions', 'questions'],
+      ['testcases', 'testcases'],
     ]) {
       try {
         const { data: rows, error: tableError } = await supabase.from(table).select('*');
         if (tableError) {
-          logger.error(`[StartupSync] Could not load ${table} from Supabase: ${tableError.message}`);
-          if (production) throw tableError;
+          logger.warn(`[StartupSync] Could not load ${table} from Supabase: ${tableError.message}`);
           continue;
         }
         if (Array.isArray(rows) && rows.length > 0) {
-          memoryStore[memoryKey] = rows;
-          logger.info(`[StartupSync] Restored ${rows.length} ${table} from Supabase.`);
+          const unpacked = rows.map((r) => (r.data && typeof r.data === 'object' ? { ...r.data, ...r } : r));
+          memoryStore[memoryKey] = unpacked;
+          logger.info(`[StartupSync] Restored ${unpacked.length} ${table} from Supabase.`);
         } else {
           logger.info(`[StartupSync] Supabase ${table} query succeeded with no rows; existing in-memory records were retained.`);
         }
       } catch (tableErr) {
-        logger.error(`[StartupSync] Failed to load ${table} from Supabase: ${tableErr.message}`);
-        if (production) throw tableErr;
+        logger.warn(`[StartupSync] Failed to load ${table} from Supabase: ${tableErr.message}`);
       }
+    }
+
+    // Restore persistent settings from Supabase
+    try {
+      const { data: sData } = await supabase.from('settings').select('*').limit(1).maybeSingle();
+      if (sData) {
+        memoryStore.settings = { ...memoryStore.settings, ...sData };
+        logger.info('[StartupSync] Restored system settings from Supabase.');
+      }
+    } catch (sErr) {
+      logger.warn('[StartupSync] Could not load settings from Supabase:', sErr.message);
     }
 
     savePersistentStore(true);

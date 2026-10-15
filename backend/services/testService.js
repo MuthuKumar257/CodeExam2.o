@@ -57,7 +57,16 @@ export class TestService {
   }
 
   static async getTestById(id) {
-    const test = memoryStore.tests.find((t) => t.id === id && !t.is_deleted);
+    let test = memoryStore.tests.find((t) => t.id === id && !t.is_deleted);
+    if (!test && isSupabaseConfigured && supabase) {
+      try {
+        const { data } = await supabase.from('assessments').select('*').eq('id', id).maybeSingle();
+        if (data) {
+          test = data.data && typeof data.data === 'object' ? { ...data.data, ...data } : data;
+          memoryStore.tests.push(test);
+        }
+      } catch {}
+    }
     if (!test) return null;
 
     // Load full question objects for this test
@@ -136,11 +145,29 @@ export class TestService {
     memoryStore.tests.unshift(newTest);
 
     if (isSupabaseConfigured && supabase) {
+      const dbRow = {
+        id: newTest.id,
+        title: newTest.title,
+        description: newTest.description || '',
+        instructions: newTest.instructions || '',
+        duration_minutes: Number(newTest.duration_minutes || newTest.durationMinutes || 60),
+        start_time: newTest.start_time || newTest.startTime || new Date().toISOString(),
+        end_time: newTest.end_time || newTest.endTime || null,
+        maximum_marks: Number(newTest.total_marks || newTest.totalMarks || 100),
+        status: newTest.status || 'ACTIVE',
+        faculty_id: newTest.faculty_id || 'usr-faculty-01',
+        allowed_languages: newTest.allowed_languages || ['javascript', 'python', 'cpp', 'java'],
+        data: newTest,
+        updated_at: new Date().toISOString(),
+      };
+      try {
+        await supabase.from('assessments').upsert(dbRow);
+      } catch (err) {
+        logger.warn('Supabase create assessment fallback:', err.message);
+      }
       try {
         await supabase.from('tests').upsert(newTest);
-      } catch (err) {
-        logger.warn('Supabase create test fallback:', err.message);
-      }
+      } catch {}
     }
 
     return newTest;
@@ -173,11 +200,29 @@ export class TestService {
     memoryStore.tests[index] = updated;
 
     if (isSupabaseConfigured && supabase) {
+      const dbRow = {
+        id,
+        title: updated.title,
+        description: updated.description || '',
+        instructions: updated.instructions || '',
+        duration_minutes: Number(updated.duration_minutes || updated.durationMinutes || 60),
+        start_time: updated.start_time || updated.startTime || null,
+        end_time: updated.end_time || updated.endTime || null,
+        maximum_marks: Number(updated.total_marks || updated.totalMarks || 100),
+        status: updated.status || 'ACTIVE',
+        faculty_id: updated.faculty_id || 'usr-faculty-01',
+        allowed_languages: updated.allowed_languages || ['javascript', 'python', 'cpp', 'java'],
+        data: updated,
+        updated_at: new Date().toISOString(),
+      };
+      try {
+        await supabase.from('assessments').update(dbRow).eq('id', id);
+      } catch (err) {
+        logger.warn('Supabase update assessment fallback:', err.message);
+      }
       try {
         await supabase.from('tests').update(updated).eq('id', id);
-      } catch (err) {
-        logger.warn('Supabase update test fallback:', err.message);
-      }
+      } catch {}
     }
 
     return updated;
