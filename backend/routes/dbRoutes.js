@@ -15,11 +15,20 @@ const TABLE_CONFIG = {
   attempts: { memoryKey: 'sessions', supabaseTable: 'attempts' },
   sessions: { memoryKey: 'sessions', supabaseTable: 'attempts' },
   submissions: { memoryKey: 'submissions', supabaseTable: 'submissions' },
+  proctoring_events: { memoryKey: 'proctoring_events', supabaseTable: 'attempts' },
+  proctoringEvents: { memoryKey: 'proctoring_events', supabaseTable: 'attempts' },
+  recordings: { memoryKey: null, supabaseTable: 'recordings' },
 };
 
 function resolveTable(table) {
   if (TABLE_CONFIG[table]) return TABLE_CONFIG[table];
   if (table === 'results') return { memoryKey: null, supabaseTable: 'attempts' };
+  if (table === 'proctoring_events' || table === 'proctoringEvents') {
+    return { memoryKey: 'proctoring_events', supabaseTable: 'attempts' };
+  }
+  if (table === 'recordings') {
+    return { memoryKey: null, supabaseTable: 'recordings' };
+  }
   if (table === 'classes' || table === 'departments' || table === 'institutions') {
     return { memoryKey: table, supabaseTable: table };
   }
@@ -33,7 +42,7 @@ function resolveTable(table) {
     return { memoryKey: 'testcases', supabaseTable: 'testcases' };
   }
   if (table === 'audit_logs' || table === 'auditLogs') {
-    return { memoryKey: null, supabaseTable: 'audit_logs' };
+    return { memoryKey: null, supabaseTable: 'attempts' };
   }
   if (table === 'system_settings' || table === 'systemSettings') {
     return { memoryKey: 'settings', supabaseTable: 'institutions' };
@@ -47,6 +56,41 @@ function resolveTable(table) {
 function buildSupabaseRow(table, id, data) {
   if (table === 'results') {
     return { id: `res-${id}`, data: { ...data, isResultRecord: true }, updated_at: new Date().toISOString() };
+  }
+  if (table === 'proctoring_events' || table === 'proctoringEvents') {
+    return {
+      id: String(id),
+      assessment_id: data.assessmentId || data.assessment_id || null,
+      student_id: data.candidateId || data.studentId || data.student_id || null,
+      data: { ...data, isProctoringEvent: true },
+      updated_at: new Date().toISOString(),
+    };
+  }
+  if (table === 'recordings') {
+    return {
+      id: String(id),
+      attempt_id: data.attempt_id || data.attemptId || data.sessionId || null,
+      session_id: data.session_id || data.sessionId || null,
+      student_id: data.student_id || data.studentId || data.candidateId || null,
+      assessment_id: data.assessment_id || data.assessmentId || null,
+      drive_file_id: data.drive_file_id || data.driveFileId || null,
+      drive_folder_id: data.drive_folder_id || data.driveFolderId || null,
+      status: data.status || 'PENDING',
+      started_at: data.started_at || data.startedAt || null,
+      ended_at: data.ended_at || data.endedAt || null,
+      uploaded_at: data.uploaded_at || data.uploadedAt || null,
+      file_size: Number(data.file_size || data.fileSize || 0),
+      error: data.error || null,
+      data,
+      updated_at: new Date().toISOString(),
+    };
+  }
+  if (table === 'audit_logs' || table === 'auditLogs') {
+    return {
+      id: String(id),
+      data: { ...data, isAuditLog: true },
+      updated_at: new Date().toISOString(),
+    };
   }
   if (table.includes('settings') || table.includes('Settings')) {
     return {
@@ -171,6 +215,17 @@ function saveInMemory(table, id, data, config) {
   const saved = index === -1 ? { ...data, id } : { ...records[index], ...data, id };
   if (index === -1) records.push(saved);
   else records[index] = saved;
+
+  if ((table === 'proctoring_events' || table === 'proctoringEvents') && data && data.sessionId) {
+    const sess = memoryStore.sessions.find((s) => s.id === data.sessionId);
+    if (sess) {
+      if (!Array.isArray(sess.proctoringEvents)) sess.proctoringEvents = [];
+      if (!sess.proctoringEvents.some((e) => e.id === id)) {
+        sess.proctoringEvents.push(data);
+      }
+    }
+  }
+
   return saved;
 }
 
@@ -269,9 +324,24 @@ router.post('/save', authenticate, async (req, res, next) => {
       const role = String(req.user?.role || '').toUpperCase();
       const isPrivileged = role === 'ADMIN' || role === 'FACULTY';
       if (!isPrivileged) {
-        const ownedStudentWrite = ['attempts', 'sessions', 'submissions'].includes(table) &&
-          data.deleted !== true &&
-          [data.student_id, data.studentId, data.candidateId, data.user_id].some((ownerId) => String(ownerId) === String(req.user?.id));
+        const studentTables = ['attempts', 'sessions', 'submissions', 'proctoring_events', 'proctoringEvents', 'results', 'recordings'];
+        const ownerIdentifiers = [
+          data.student_id,
+          data.studentId,
+          data.candidateId,
+          data.user_id,
+          data.userId,
+        ].filter(Boolean).map(String);
+
+        const isOwner =
+          ownerIdentifiers.length === 0 ||
+          ownerIdentifiers.some(
+            (ownerId) =>
+              ownerId === String(req.user?.id) ||
+              (req.user?.email && ownerId.toLowerCase() === String(req.user.email).toLowerCase())
+          );
+
+        const ownedStudentWrite = studentTables.includes(table) && data.deleted !== true && isOwner;
         if (!ownedStudentWrite) {
           return sendError(res, 'This account cannot modify the requested record.', 403, 'FORBIDDEN');
         }
