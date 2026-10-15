@@ -56,6 +56,7 @@ import {
   updateMonitoringStatusApi,
 } from '../../services/api';
 import { RecordingTimelineEvent } from '../../types';
+import { AuthScreen } from '../auth/AuthScreen';
 
 interface AssessmentWorkspaceProps {
   assessment: Assessment;
@@ -106,6 +107,8 @@ export const AssessmentWorkspace: React.FC<AssessmentWorkspaceProps> = ({
   const [cameraActive, setCameraActive] = useState<boolean>(true);
   const [micActive, setMicActive] = useState<boolean>(true);
   const [cameraRetryCount, setCameraRetryCount] = useState<number>(0);
+  const [heartbeatAuthRequired, setHeartbeatAuthRequired] = useState(false);
+  const [heartbeatAuthVersion, setHeartbeatAuthVersion] = useState(0);
 
   // Live stream & proctoring telemetry states
   const [currentMediaStream, setCurrentMediaStream] = useState<MediaStream | null>(propMediaStream || null);
@@ -2263,9 +2266,11 @@ fn main() {
     if (isPaused || isSubmitting) return;
 
     let heartbeatTimeoutTimer: any = null;
+    let heartbeatInterval: any = null;
+    let heartbeatStopped = false;
 
     const pingHeartbeat = async () => {
-      if (isHeartbeatInFlightRef.current) return;
+      if (heartbeatStopped || assessmentEndedRef.current || isHeartbeatInFlightRef.current) return;
       isHeartbeatInFlightRef.current = true;
 
       const controller = new AbortController();
@@ -2274,9 +2279,17 @@ fn main() {
       }, 9000);
 
       try {
+        // The API authenticates with the application's signed JWT, issued by
+        // /api/auth/login. Supabase and Firebase tokens are different issuers.
+        const appToken = typeof window !== 'undefined'
+          ? window.localStorage.getItem('codeguard_auth_token')
+          : null;
         const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}/heartbeat`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(appToken ? { Authorization: `Bearer ${appToken}` } : {}),
+          },
           signal: controller.signal,
           body: JSON.stringify({
             assessmentId: safeAssessment.id,
@@ -2308,6 +2321,17 @@ fn main() {
           }
         } else {
           consecutiveHeartbeatFailuresRef.current++;
+          if (res.status === 401) {
+            // Authentication must be restored through the normal login flow.
+            // Leave the assessment state intact while the student reconnects.
+            console.warn('[AssessmentWorkspace] Heartbeat authentication expired or is missing; assessment remains active.');
+            heartbeatStopped = true;
+            setHeartbeatAuthRequired(true);
+          } else if (res.status === 409) {
+            // The server has authoritatively ended this attempt. Stop both
+            // transports; a heartbeat must never revive a terminal session.
+            heartbeatStopped = true;
+          }
           console.warn(`[AssessmentWorkspace] Heartbeat non-ok status: ${res.status}. Test remains ACTIVE.`);
         }
       } catch (err: any) {
@@ -2319,7 +2343,7 @@ fn main() {
         isHeartbeatInFlightRef.current = false;
       }
 
-      if (socketRef.current && socketRef.current.connected) {
+      if (!heartbeatStopped && !assessmentEndedRef.current && socketRef.current && socketRef.current.connected) {
         try {
           socketRef.current.emit('candidate_heartbeat', {
             assessmentId: safeAssessment.id,
@@ -2333,12 +2357,12 @@ fn main() {
     };
 
     pingHeartbeat();
-    const heartbeatInterval = setInterval(pingHeartbeat, 12000);
+    heartbeatInterval = setInterval(pingHeartbeat, 12000);
     return () => {
       clearInterval(heartbeatInterval);
       if (heartbeatTimeoutTimer) clearTimeout(heartbeatTimeoutTimer);
     };
-  }, [isPaused, isSubmitting, session.id, safeAssessment.id, session.candidateId]);
+  }, [isPaused, isSubmitting, session.id, safeAssessment.id, session.candidateId, heartbeatAuthVersion]);
 
   // Event Listeners for Proctoring
   useEffect(() => {
@@ -2740,6 +2764,26 @@ fn main() {
 
   return (
     <div className="h-screen flex flex-col bg-slate-950 text-slate-100 overflow-hidden select-none relative">
+      {heartbeatAuthRequired && (
+        <div className="fixed inset-0 z-[100] overflow-y-auto bg-slate-950/95 backdrop-blur-sm">
+          <div className="min-h-full flex flex-col justify-center">
+            <div className="mx-auto max-w-xl px-4 py-6 text-center">
+              <h2 className="text-lg font-bold text-white">Sign in to reconnect</h2>
+              <p className="mt-2 text-sm text-slate-300">
+                Your assessment is still open. Sign in again to restore the secure connection; your current work remains in place.
+              </p>
+            </div>
+            <AuthScreen onSuccess={() => {
+              setHeartbeatAuthRequired(false);
+              setHeartbeatAuthVersion((version) => version + 1);
+              if (socketRef.current) {
+                socketRef.current.disconnect();
+                socketRef.current.connect();
+              }
+            }} />
+          </div>
+        </div>
+      )}
       {/* FLOATING NON-INTRUSIVE NOTIFICATION TOAST */}
       {infoToast && (
         <div className="fixed top-14 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-3 duration-200 pointer-events-none">

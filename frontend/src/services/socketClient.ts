@@ -20,6 +20,14 @@ export function createResilientSocket(namespace: string = '/'): Socket {
     randomizationFactor: 0.5,
     timeout: 20000,
     autoConnect: true,
+    // Socket.IO calls this for every connection/reconnection, so a reissued
+    // application JWT is picked up without trusting a client-supplied user ID.
+    auth: (callback) => {
+      const token = typeof window !== 'undefined'
+        ? window.localStorage.getItem('codeguard_auth_token')
+        : null;
+      callback({ token });
+    },
   });
 
   socket.on('connect', () => {

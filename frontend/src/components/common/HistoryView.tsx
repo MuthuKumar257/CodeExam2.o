@@ -940,6 +940,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredAssessments.map((asm) => {
                 const isStudent = isStudentUser(currentUser);
+                const targetClass = Array.isArray(classes)
+                  ? classes.find((classroom) => classroom?.id === asm.classId)
+                  : undefined;
                 const asmCandidateSessions = isStudent
                   ? sessions.filter((s) => s.assessmentId === asm.id && (s.candidateId === currentUser.id || (s as any).studentId === currentUser.id))
                   : sessions.filter((s) => s.assessmentId === asm.id);

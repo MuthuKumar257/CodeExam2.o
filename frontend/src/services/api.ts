@@ -1,4 +1,4 @@
-import { auth, getLocalStoredUser } from './firebase';
+import { getLocalStoredUser } from './firebase';
 
 const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -42,7 +42,9 @@ async function request<T>(path: string, options: RequestOptions = {}, maxRetries
 
   const exec = async (): Promise<T> => {
     const storedToken = typeof window !== 'undefined' ? localStorage.getItem('codeguard_auth_token') : null;
-    const token = (auth.currentUser ? await auth.currentUser.getIdToken() : null) || storedToken;
+    // The API verifies application JWTs issued by /api/auth/login. A Firebase
+    // ID token has a different issuer and is not accepted by this middleware.
+    const token = storedToken;
     const headers = new Headers(options.headers);
     if (token) headers.set('Authorization', `Bearer ${token}`);
     const localUser = getLocalStoredUser();
@@ -186,7 +188,7 @@ export async function generateReport(assessmentId: string, format: 'pdf' | 'csv'
 }
 
 export async function downloadFile(fileId: string): Promise<Blob> {
-  const token = auth.currentUser ? await auth.currentUser.getIdToken() : null;
+  const token = typeof window !== 'undefined' ? localStorage.getItem('codeguard_auth_token') : null;
   const response = await fetch(`${API_BASE}/api/files/${fileId}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   });
