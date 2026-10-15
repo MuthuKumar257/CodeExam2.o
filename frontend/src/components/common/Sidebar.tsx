@@ -68,7 +68,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       // CANDIDATE / STUDENT
       return [
         { id: 'candidate_dashboard', label: 'My Assessments', icon: LayoutDashboard },
-        { id: 'candidate_history', label: 'My Results & History', icon: History },
         { id: 'candidate_rankings', label: 'Rankings & Leaderboard', icon: Award },
         { id: 'candidate_settings', label: 'Settings', icon: Settings },
       ];

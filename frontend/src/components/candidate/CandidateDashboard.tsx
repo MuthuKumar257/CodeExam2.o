@@ -26,7 +26,6 @@ import {
   ArrowRight,
   Sparkles,
   Trophy,
-  History,
   FileText,
   Video,
   Monitor,
@@ -455,14 +454,6 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
           <div className="flex items-center gap-2 flex-wrap">
             {onNavigateToTab && (
               <>
-                <button
-                  onClick={() => onNavigateToTab('candidate_history')}
-                  className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-[#1e1e24] text-zinc-300 hover:text-white border border-white/10 hover:border-indigo-500/40 hover:bg-white/5 cursor-pointer transition shadow-sm"
-                  title="View test attempt history and past results"
-                >
-                  <History className="w-4 h-4 text-indigo-400" />
-                  <span>My Results & History</span>
-                </button>
                 <button
                   onClick={() => onNavigateToTab('candidate_rankings')}
                   className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-[#1e1e24] text-zinc-300 hover:text-white border border-white/10 hover:border-amber-500/40 hover:bg-white/5 cursor-pointer transition shadow-sm"

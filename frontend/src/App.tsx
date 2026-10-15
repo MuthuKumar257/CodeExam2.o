@@ -3675,24 +3675,6 @@ export default function App() {
                 />
               )}
 
-              {activeNav === 'candidate_history' && (
-                <HistoryView
-                  assessments={assessments}
-                  sessions={sessions.filter((s) => s.candidateId === currentUser.id || (s as any).studentId === currentUser.id)}
-                  classes={classes}
-                  users={users}
-                  currentUser={currentUser}
-                  systemSettings={systemSettings}
-                  submissions={submissions.filter((s) => s.candidateId === currentUser.id || (s as any).studentId === currentUser.id)}
-                  questions={questions}
-                  results={results.filter((r) => r.candidateId === currentUser.id || (r as any).studentId === currentUser.id)}
-                  onInspectCandidate={(sessId) => {
-                    setSelectedSessionId(sessId);
-                  }}
-                  onRestartTest={handleRestartTest}
-                />
-              )}
-
               {activeNav === 'candidate_rankings' && (
                 <StudentRankingView
                   users={users}
@@ -3705,7 +3687,7 @@ export default function App() {
                 />
               )}
 
-              {(!['candidate_settings', 'candidate_history', 'candidate_rankings'].includes(activeNav)) && (
+              {(!['candidate_settings', 'candidate_rankings'].includes(activeNav)) && (
                 <>
                   {candidateStage === 'DASHBOARD' && (() => {
                     const studentClasses = classes.filter(
