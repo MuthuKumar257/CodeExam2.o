@@ -142,20 +142,32 @@ export const FacultyDashboard: React.FC<FacultyDashboardProps> = ({
   ]).size;
 
   const getEnrolledCandidatesCount = (asm: Assessment) => {
-    if (asm.classId) {
-      const cls = classes.find((c) => c.id === asm.classId);
-      if (cls) {
-        const clsStudents = users.filter((u) => isStudentUser(u) && isStudentAssignedToClass(cls, u));
-        if (clsStudents.length > 0) return clsStudents.length;
-        const cStudentIds = [
-          ...(cls.studentIds || []),
-          ...((cls as any).student_ids || []),
-          ...((cls as any).data?.studentIds || []),
-          ...((cls as any).data?.student_ids || []),
-        ];
-        if (cStudentIds.length > 0) return new Set(cStudentIds).size;
-      }
+    const classIds = [
+      asm.classId,
+      ...((asm as any).class_id ? [(asm as any).class_id] : []),
+      ...(asm.assignedClassIds || []),
+      ...((asm as any).class_ids || []),
+    ].filter(Boolean);
+
+    if (classIds.length > 0) {
+      const enrolledStudentIds = new Set<string>();
+      classIds.forEach((cId) => {
+        const cls = classes.find((c) => c.id === cId);
+        if (cls) {
+          const clsStudents = users.filter((u) => isStudentUser(u) && isStudentAssignedToClass(cls, u));
+          clsStudents.forEach((s) => enrolledStudentIds.add(s.id));
+          const cStudentIds = [
+            ...(cls.studentIds || []),
+            ...((cls as any).student_ids || []),
+            ...((cls as any).data?.studentIds || []),
+            ...((cls as any).data?.student_ids || []),
+          ];
+          cStudentIds.forEach((id) => enrolledStudentIds.add(String(id)));
+        }
+      });
+      if (enrolledStudentIds.size > 0) return enrolledStudentIds.size;
     }
+
     const explicitCandidates = [
       ...(asm.candidateIds || []),
       ...((asm as any).candidate_ids || []),
@@ -254,6 +266,14 @@ export const FacultyDashboard: React.FC<FacultyDashboardProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 text-slate-300">
+              {assessments.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="p-8 text-center text-slate-400">
+                    <p className="font-semibold text-slate-300">No assessments found for this classroom filter</p>
+                    <p className="text-xs text-slate-500 mt-1">Select "All Classrooms & Assessments" from the classroom filter above or click "Create New Assessment".</p>
+                  </td>
+                </tr>
+              )}
               {Array.from(
                 new Map<string, Assessment>(
                   assessments.filter((a): a is Assessment => Boolean(a && a.id)).map((a) => [a.id, a])

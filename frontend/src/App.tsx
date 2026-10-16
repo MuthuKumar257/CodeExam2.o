@@ -3374,10 +3374,10 @@ export default function App() {
           {currentUser.role === 'FACULTY' && (() => {
             const myClasses = classes.filter((c) => isFacultyAssignedToClass(c, currentUser));
             const availableClasses = myClasses.length > 0 ? myClasses : classes;
-            const currentClassId = (selectedClassId && availableClasses.some((c) => c.id === selectedClassId))
+            const currentClassId = (selectedClassId && (selectedClassId === 'ALL' || availableClasses.some((c) => c.id === selectedClassId)))
               ? selectedClassId
-              : (availableClasses[0]?.id || '');
-            const activeClassObj = availableClasses.find((c) => c.id === currentClassId) || null;
+              : 'ALL';
+            const activeClassObj = currentClassId === 'ALL' ? null : (availableClasses.find((c) => c.id === currentClassId) || null);
 
             // Filter assessments & sessions by classroom
             const classStudentIds = activeClassObj
@@ -3388,15 +3388,65 @@ export default function App() {
                   ...((activeClassObj as any).data?.student_ids || []),
                 ]
               : [];
+
+            const isAssessmentBelongsToFaculty = (a: Assessment) => {
+              if (!a) return false;
+              const fid =
+                a.facultyId ||
+                (a as any).faculty_id ||
+                a.creatorId ||
+                (a as any).creator_id ||
+                (a as any).authorId ||
+                (a as any).author_id ||
+                (a as any).createdBy ||
+                (a as any).created_by;
+              if (fid && (fid === currentUser.id || fid === currentUser.uid)) return true;
+              if (currentUser.email && ((a as any).facultyEmail === currentUser.email || (a as any).faculty_email === currentUser.email)) return true;
+              if (myClasses.length > 0) {
+                if (a.classId && myClasses.some((c) => c.id === a.classId)) return true;
+                if (a.assignedClassIds && myClasses.some((c) => a.assignedClassIds?.includes(c.id))) return true;
+                if ((a as any).class_ids && myClasses.some((c) => (a as any).class_ids?.includes(c.id))) return true;
+              }
+              if (!a.classId || a.classId === 'ALL' || (a as any).isGeneral || (a as any).scope === 'ALL') return true;
+              if (myClasses.length === 0) return true;
+              return false;
+            };
+
             const filteredAssessments = assessments.filter((a) => {
-              if (currentClassId && a.classId === currentClassId) return true;
-              if (!a.classId && a.facultyId === currentUser.id) return true;
+              if (!a) return false;
+              if (currentClassId === 'ALL') {
+                return isAssessmentBelongsToFaculty(a);
+              }
+              const matchesClass =
+                a.classId === currentClassId ||
+                (a.assignedClassIds && a.assignedClassIds.includes(currentClassId)) ||
+                ((a as any).class_ids && (a as any).class_ids.includes(currentClassId)) ||
+                (a as any).class_id === currentClassId;
+              if (matchesClass) return true;
+              const fid =
+                a.facultyId ||
+                (a as any).faculty_id ||
+                a.creatorId ||
+                (a as any).creator_id ||
+                (a as any).authorId ||
+                (a as any).author_id;
+              if ((!a.classId || a.classId === 'ALL') && fid === currentUser.id) return true;
               return false;
             });
+
+            // Fallback: if filteredAssessments is empty for ALL, show all assessments so faculty is never left empty-handed
+            const facultyAllAssessments = assessments.filter(isAssessmentBelongsToFaculty);
+            const displayAssessments = filteredAssessments.length > 0
+              ? filteredAssessments
+              : (currentClassId === 'ALL' ? (facultyAllAssessments.length > 0 ? facultyAllAssessments : assessments) : filteredAssessments);
+
             const filteredSessions = sessions.filter((s) => {
-              if (currentClassId && classStudentIds.includes(s.candidateId)) return true;
-              const belongsToFilteredAsm = filteredAssessments.some((a) => a.id === s.assessmentId);
-              return belongsToFilteredAsm;
+              if (!s) return false;
+              if (currentClassId === 'ALL') {
+                return displayAssessments.some((a) => a.id === s.assessmentId);
+              }
+              if (classStudentIds.includes(s.candidateId) || classStudentIds.includes((s as any).studentId)) return true;
+              return displayAssessments.some((a) => a.id === s.assessmentId);
             });
 
             return (
@@ -3414,7 +3464,7 @@ export default function App() {
                       <div>
                         <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 block">Classroom Filter</span>
                         <span className="text-sm font-bold text-slate-100 block">
-                          {activeClassObj ? activeClassObj.name : 'Classroom View'}
+                          {activeClassObj ? activeClassObj.name : 'All Classrooms & Assessments'}
                         </span>
                       </div>
                     </div>
@@ -3426,6 +3476,7 @@ export default function App() {
                         onChange={(e) => setSelectedClassId(e.target.value)}
                         className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-medium cursor-pointer"
                       >
+                        <option value="ALL">All Classrooms & Assessments</option>
                         {availableClasses.map((cls) => (
                           <option key={cls.id} value={cls.id}>
                             {cls.name}
@@ -3438,7 +3489,7 @@ export default function App() {
 
                 {activeNav === 'faculty_dashboard' && (
                   <FacultyDashboard
-                    assessments={filteredAssessments}
+                    assessments={displayAssessments}
                     sessions={filteredSessions}
                     users={users}
                     classes={classes}
@@ -3467,8 +3518,8 @@ export default function App() {
 
                 {activeNav === 'faculty_assessments' && (
                   <FacultyAssessmentsPage
-                    assessments={filteredAssessments}
-                    sessions={filteredSessions}
+                    assessments={facultyAllAssessments.length > 0 ? facultyAllAssessments : assessments}
+                    sessions={sessions}
                     submissions={submissions}
                     classes={classes}
                     users={users}
@@ -3499,7 +3550,7 @@ export default function App() {
                     systemSettings={systemSettings}
                     facultySettings={facultySettings}
                     classes={myClasses}
-                    defaultClassId={currentClassId}
+                    defaultClassId={currentClassId === 'ALL' ? (availableClasses[0]?.id || '') : currentClassId}
                     onCreateAssessment={async (asmData) => {
                       if (editingAssessment) {
                         const updatedAsm: Assessment = {
@@ -3512,7 +3563,8 @@ export default function App() {
                         setEditingAssessment(null);
                         setActiveNav('faculty_assessments');
                       } else {
-                        await handleCreateAssessment({ ...asmData, classId: asmData.classId || currentClassId });
+                        const targetClassId = asmData.classId || (currentClassId === 'ALL' ? (availableClasses[0]?.id || '') : currentClassId);
+                        await handleCreateAssessment({ ...asmData, classId: targetClassId });
                       }
                     }}
                     onCancel={() => {

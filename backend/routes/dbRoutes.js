@@ -251,7 +251,14 @@ async function readTable(table, fallback = []) {
 
 function unpackRow(row) {
   if (!row || typeof row !== 'object') return row;
-  return row.data && typeof row.data === 'object' ? { ...row.data, id: row.id } : row;
+  const unpacked = row.data && typeof row.data === 'object' ? { ...row.data, ...row } : { ...row };
+  if (unpacked.faculty_id && !unpacked.facultyId) unpacked.facultyId = unpacked.faculty_id;
+  if (unpacked.facultyId && !unpacked.faculty_id) unpacked.faculty_id = unpacked.facultyId;
+  if (unpacked.class_id && !unpacked.classId) unpacked.classId = unpacked.class_id;
+  if (unpacked.classId && !unpacked.class_id) unpacked.class_id = unpacked.classId;
+  if (unpacked.duration_minutes && !unpacked.durationMinutes) unpacked.durationMinutes = unpacked.duration_minutes;
+  if (unpacked.durationMinutes && !unpacked.duration_minutes) unpacked.duration_minutes = unpacked.durationMinutes;
+  return unpacked;
 }
 
 router.get('/all', async (_req, res, next) => {
@@ -287,11 +294,11 @@ router.get('/all', async (_req, res, next) => {
 
     return sendSuccess(res, {
       users,
-      assessments,
-      questions,
-      attempts,
-      sessions: attempts,
-      submissions,
+      assessments: assessments.map(unpackRow),
+      questions: questions.map(unpackRow),
+      attempts: attempts.map(unpackRow),
+      sessions: attempts.map(unpackRow),
+      submissions: submissions.map(unpackRow),
       results: [],
       classes: classes.map(unpackRow),
       departments: departments.map(unpackRow),

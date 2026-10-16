@@ -26,8 +26,18 @@ export class TestService {
         const { data, count, error } = await query.range(from, to);
         if (!error && Array.isArray(data) && data.length > 0) {
           const total = count ?? data.length;
+          const unpackedData = data.map((row) => {
+            const base = row.data && typeof row.data === 'object' ? { ...row.data, ...row } : { ...row };
+            if (base.faculty_id && !base.facultyId) base.facultyId = base.faculty_id;
+            if (base.facultyId && !base.faculty_id) base.faculty_id = base.facultyId;
+            if (base.class_id && !base.classId) base.classId = base.class_id;
+            if (base.classId && !base.class_id) base.class_id = base.classId;
+            if (base.duration_minutes && !base.durationMinutes) base.durationMinutes = base.duration_minutes;
+            if (base.durationMinutes && !base.duration_minutes) base.duration_minutes = base.durationMinutes;
+            return base;
+          });
           return {
-            data,
+            data: unpackedData,
             pagination: {
               page,
               limit,
@@ -43,7 +53,16 @@ export class TestService {
 
     const total = tests.length;
     const startIndex = (page - 1) * limit;
-    const paginated = tests.slice(startIndex, startIndex + limit);
+    const paginated = tests.slice(startIndex, startIndex + limit).map((row) => {
+      const base = row.data && typeof row.data === 'object' ? { ...row.data, ...row } : { ...row };
+      if (base.faculty_id && !base.facultyId) base.facultyId = base.faculty_id;
+      if (base.facultyId && !base.faculty_id) base.faculty_id = base.facultyId;
+      if (base.class_id && !base.classId) base.classId = base.class_id;
+      if (base.classId && !base.class_id) base.class_id = base.classId;
+      if (base.duration_minutes && !base.durationMinutes) base.durationMinutes = base.duration_minutes;
+      if (base.durationMinutes && !base.duration_minutes) base.duration_minutes = base.durationMinutes;
+      return base;
+    });
 
     return {
       data: paginated,
@@ -63,6 +82,12 @@ export class TestService {
         const { data } = await supabase.from('assessments').select('*').eq('id', id).maybeSingle();
         if (data) {
           test = data.data && typeof data.data === 'object' ? { ...data.data, ...data } : data;
+          if (test.faculty_id && !test.facultyId) test.facultyId = test.faculty_id;
+          if (test.facultyId && !test.faculty_id) test.faculty_id = test.facultyId;
+          if (test.class_id && !test.classId) test.classId = test.class_id;
+          if (test.classId && !test.class_id) test.class_id = test.classId;
+          if (test.duration_minutes && !test.durationMinutes) test.durationMinutes = test.duration_minutes;
+          if (test.durationMinutes && !test.duration_minutes) test.duration_minutes = test.durationMinutes;
           memoryStore.tests.push(test);
         }
       } catch {}

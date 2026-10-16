@@ -174,7 +174,11 @@ export const FacultyAssessmentsPage: React.FC<FacultyAssessmentsPageProps> = ({
         (selectedStatus === 'UPCOMING' && (effectiveSt === 'UPCOMING' || effectiveSt === 'DRAFT'));
 
       const matchesClass =
-        selectedClassFilter === 'ALL' || asm.classId === selectedClassFilter;
+        selectedClassFilter === 'ALL' ||
+        asm.classId === selectedClassFilter ||
+        (asm.assignedClassIds && asm.assignedClassIds.includes(selectedClassFilter)) ||
+        ((asm as any).class_ids && (asm as any).class_ids.includes(selectedClassFilter)) ||
+        (asm as any).class_id === selectedClassFilter;
 
       return matchesSearch && matchesStatus && matchesClass;
     });

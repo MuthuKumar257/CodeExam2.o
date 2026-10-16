@@ -253,6 +253,80 @@ function saveStorage<T>(key: string, data: T): void {
   } catch {}
 }
 
+export function normalizeAssessmentFields(asm: any): Assessment {
+  if (!asm || typeof asm !== 'object') return asm;
+  const unpacked = asm.data && typeof asm.data === 'object' ? { ...asm.data, ...asm } : { ...asm };
+
+  const classId = unpacked.classId || unpacked.class_id || unpacked.data?.classId || unpacked.data?.class_id || '';
+  const facultyId =
+    unpacked.facultyId ||
+    unpacked.faculty_id ||
+    unpacked.creatorId ||
+    unpacked.creator_id ||
+    unpacked.authorId ||
+    unpacked.author_id ||
+    unpacked.createdBy ||
+    unpacked.created_by ||
+    unpacked.data?.facultyId ||
+    unpacked.data?.faculty_id ||
+    '';
+  const durationMinutes = Number(
+    unpacked.durationMinutes ||
+    unpacked.duration_minutes ||
+    unpacked.duration ||
+    unpacked.data?.durationMinutes ||
+    unpacked.data?.duration_minutes ||
+    60
+  );
+  const questions = Array.isArray(unpacked.questions)
+    ? unpacked.questions
+    : Array.isArray(unpacked.data?.questions)
+    ? unpacked.data.questions
+    : [];
+  const questionIds = Array.isArray(unpacked.questionIds)
+    ? unpacked.questionIds
+    : Array.isArray(unpacked.question_ids)
+    ? unpacked.question_ids
+    : Array.isArray(unpacked.data?.questionIds)
+    ? unpacked.data.questionIds
+    : questions.map((q: any) => (typeof q === 'string' ? q : q?.id)).filter(Boolean);
+  const assignedClassIds = Array.isArray(unpacked.assignedClassIds)
+    ? unpacked.assignedClassIds
+    : Array.isArray(unpacked.class_ids)
+    ? unpacked.class_ids
+    : Array.isArray(unpacked.data?.assignedClassIds)
+    ? unpacked.data.assignedClassIds
+    : classId ? [classId] : [];
+  const candidateIds = Array.isArray(unpacked.candidateIds)
+    ? unpacked.candidateIds
+    : Array.isArray(unpacked.candidate_ids)
+    ? unpacked.candidate_ids
+    : Array.isArray(unpacked.data?.candidateIds)
+    ? unpacked.data.candidateIds
+    : [];
+
+  return {
+    ...unpacked,
+    id: String(unpacked.id),
+    title: unpacked.title || 'Untitled Assessment',
+    description: unpacked.description || '',
+    instructions: unpacked.instructions || '',
+    classId,
+    class_id: classId,
+    facultyId,
+    faculty_id: facultyId,
+    creatorId: facultyId,
+    durationMinutes,
+    duration_minutes: durationMinutes,
+    questions,
+    questionIds,
+    question_ids: questionIds,
+    assignedClassIds,
+    candidateIds,
+    status: (unpacked.status || 'ACTIVE').toUpperCase(),
+  };
+}
+
 // Initial Memory Store
 const localFallback = <T>(seed: T): T => {
   if (import.meta.env.PROD && Array.isArray(seed)) return [] as unknown as T;
@@ -271,7 +345,8 @@ let localDepartments: Department[] = loadStorage(STORAGE_KEYS.DEPARTMENTS, local
 saveStorage(STORAGE_KEYS.DEPARTMENTS, localDepartments);
 
 let localAssessments: Assessment[] = loadStorage(STORAGE_KEYS.ASSESSMENTS, localFallback(INITIAL_ASSESSMENTS))
-  .filter((assessment) => !LEGACY_DEMO_ASSESSMENT_IDS.has(assessment.id));
+  .filter((assessment) => !LEGACY_DEMO_ASSESSMENT_IDS.has(assessment.id))
+  .map(normalizeAssessmentFields);
 saveStorage(STORAGE_KEYS.ASSESSMENTS, localAssessments);
 
 let localQuestions: Question[] = loadStorage(STORAGE_KEYS.QUESTIONS, localFallback(INITIAL_QUESTIONS))
@@ -381,11 +456,13 @@ try {
         }
         saveStorage(STORAGE_KEYS.USERS, localUsers);
         notify(listeners.users, localUsers);
-      } else if (table === 'assessments') {
+      } else if (table === 'assessments' || table === 'tests') {
         if (action === 'delete') localAssessments = localAssessments.filter((a) => a.id !== id);
         else if (action === 'clear_all' || action === 'clear') localAssessments = [];
         else if (data) {
-          localAssessments = mergeArraySmart(localAssessments, Array.isArray(data) ? data : [data]);
+          const rawItems = Array.isArray(data) ? data : [data];
+          const normalized = rawItems.map(normalizeAssessmentFields);
+          localAssessments = mergeArraySmart(localAssessments, normalized);
         }
         saveStorage(STORAGE_KEYS.ASSESSMENTS, localAssessments);
         notify(listeners.assessments, localAssessments);
@@ -758,9 +835,9 @@ export async function fetchModularAssessments(): Promise<void> {
     if (!res.ok) return;
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
-      const validServerAssessments = json.data.filter(
-        (a: any) => !a.is_deleted && a.status !== 'DELETED' && !LEGACY_DEMO_ASSESSMENT_IDS.has(a.id)
-      );
+      const validServerAssessments = json.data
+        .filter((a: any) => !a.is_deleted && a.status !== 'DELETED' && !LEGACY_DEMO_ASSESSMENT_IDS.has(a.id))
+        .map(normalizeAssessmentFields);
       localAssessments = deduplicateById(validServerAssessments);
       saveStorage(STORAGE_KEYS.ASSESSMENTS, localAssessments);
       notify(listeners.assessments, localAssessments);
@@ -913,7 +990,13 @@ export async function reconcileAllData(): Promise<{ success: boolean; message: s
       if (json.success && json.data) {
         const d = json.data;
         if (d.users) { localUsers = mergeArraySmart(localUsers, d.users); saveStorage(STORAGE_KEYS.USERS, localUsers); notify(listeners.users, localUsers); }
-        if (d.assessments) { localAssessments = mergeArraySmart(localAssessments, d.assessments); saveStorage(STORAGE_KEYS.ASSESSMENTS, localAssessments); notify(listeners.assessments, localAssessments); }
+        if (d.assessments) {
+          const rawAsms = Array.isArray(d.assessments) ? d.assessments : [d.assessments];
+          const normalized = rawAsms.map(normalizeAssessmentFields);
+          localAssessments = mergeArraySmart(localAssessments, normalized);
+          saveStorage(STORAGE_KEYS.ASSESSMENTS, localAssessments);
+          notify(listeners.assessments, localAssessments);
+        }
         if (d.questions) { localQuestions = mergeArraySmart(localQuestions, d.questions); saveStorage(STORAGE_KEYS.QUESTIONS, localQuestions); notify(listeners.questions, localQuestions); }
         if (d.attempts || d.sessions) { localSessions = mergeArraySmart(localSessions, d.attempts || d.sessions); saveStorage(STORAGE_KEYS.SESSIONS, localSessions); notify(listeners.sessions, localSessions); notify(listeners.attempts, localSessions as any); }
         if (d.submissions) { localSubmissions = mergeArraySmart(localSubmissions, d.submissions); saveStorage(STORAGE_KEYS.SUBMISSIONS, localSubmissions); notify(listeners.submissions, localSubmissions); }
@@ -1597,7 +1680,8 @@ export function subscribeAssessments(callback: (assessments: Assessment[]) => vo
 }
 
 export async function saveAssessmentToFirestore(asm: Assessment): Promise<void> {
-  const cleaned = cleanObject(asm);
+  const normalized = normalizeAssessmentFields(asm);
+  const cleaned = cleanObject(normalized);
   localAssessments = deduplicateById([cleaned, ...localAssessments.filter((a) => a.id !== asm.id)]);
   saveStorage(STORAGE_KEYS.ASSESSMENTS, localAssessments);
   notify(listeners.assessments, localAssessments);
