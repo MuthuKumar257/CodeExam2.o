@@ -17,6 +17,9 @@ function isMissingRuntimeError(stderr?: string): boolean {
   return (
     s.includes('enoent') ||
     s.includes('spawn') ||
+    s.includes('compiler unavailable') ||
+    s.includes('compiler_unavailable') ||
+    s.includes('runtime unavailable') ||
     s.includes('python was not found') ||
     s.includes('python3: command not found') ||
     s.includes('python: command not found') ||
@@ -34,7 +37,9 @@ function isMissingRuntimeError(stderr?: string): boolean {
     s.includes('go: not found') ||
     s.includes('rustc: command not found') ||
     s.includes('rustc: not found') ||
-    s.includes('node: command not found')
+    s.includes('node: command not found') ||
+    s.includes('tsc: command not found') ||
+    s.includes('tsc: not found')
   );
 }
 
@@ -47,6 +52,7 @@ async function runDirectPistonSandbox(
   try {
     const lang = language.toLowerCase();
     let languageId = 71; // Python 3 default
+    let effectiveCode = sourceCode;
 
     if (lang === 'python' || lang === 'py' || lang === 'python3') {
       languageId = 71;
@@ -60,6 +66,10 @@ async function runDirectPistonSandbox(
       languageId = 50;
     } else if (lang === 'java') {
       languageId = 62;
+      // In Judge0 standard execution, the public class should be Main
+      if (effectiveCode.includes('public class ') && !effectiveCode.includes('public class Main')) {
+        effectiveCode = effectiveCode.replace(/public\s+class\s+([A-Za-z0-9_]+)/g, 'public class Main');
+      }
     } else if (lang === 'go' || lang === 'golang') {
       languageId = 60;
     } else if (lang === 'rust' || lang === 'rs') {
@@ -75,7 +85,7 @@ async function runDirectPistonSandbox(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         language_id: languageId,
-        source_code: sourceCode,
+        source_code: effectiveCode,
         stdin: inputStr || '',
         cpu_time_limit: Math.min(Math.ceil(timeoutMs / 1000), 5),
       }),

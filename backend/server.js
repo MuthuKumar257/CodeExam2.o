@@ -33,6 +33,7 @@ import { isSupabaseConfigured, supabase, syncFromSupabaseOnStartup } from './ser
 import { logger } from './utils/logger.js';
 import { SessionService } from './services/sessionService.js';
 import { sendError, sendSuccess } from './utils/response.js';
+import { logStartupDiagnostics, auditToolchains } from './services/compilerRegistry.js';
 
 dotenv.config();
 
@@ -80,6 +81,23 @@ app.all(['/', '/api/health', '/health'], (_req, res) => {
     uptime_seconds: process.uptime(),
     server_time: new Date().toISOString(),
   });
+});
+
+app.get('/api/health/compilers', async (req, res) => {
+  try {
+    const toolchains = await auditToolchains();
+    return res.status(200).json({
+      success: true,
+      service: 'CodeExam Compiler Registry',
+      toolchains,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to audit toolchains',
+      error: err.message,
+    });
+  }
 });
 
 app.get('/api/health/database', async (req, res, next) => {
@@ -275,6 +293,7 @@ async function startServer() {
   // list/report handlers. In production, a failed sessions/submissions read
   // aborts startup instead of returning an empty in-memory view as success.
   await syncFromSupabaseOnStartup();
+  await logStartupDiagnostics();
 
   return new Promise((resolve) => {
     server.listen(PORT, () => {

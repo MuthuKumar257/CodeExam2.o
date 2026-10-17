@@ -38,7 +38,7 @@ import {
 import { executeCodeInSandbox, executeCustomInput, SingleExecutionResult } from '../../services/codeRunner';
 import { Assessment, CandidateSession, CodeExecutionResult, Question, Submission, StudentSettings } from '../../types';
 
-const SUPPORTED_LANGUAGES = ['c', 'cpp', 'java', 'python', 'javascript'] as const;
+const SUPPORTED_LANGUAGES = ['c', 'cpp', 'java', 'python', 'javascript', 'typescript', 'go', 'rust'] as const;
 import { Socket } from 'socket.io-client';
 import { createResilientSocket, getOrCreateSessionSocket, closeSessionSocket } from '../../services/socketClient';
 import { CandidateWebRTCPublisher } from '../../services/webrtcProctor';
@@ -3214,7 +3214,17 @@ fn main() {
                   configuredLanguages.length === 0 || configuredLanguages.includes(lang)
                 ).map((lang) => (
                   <option key={lang} value={lang}>
-                    {lang === 'cpp' ? 'C++' : lang === 'javascript' ? 'JavaScript' : lang.toUpperCase()}
+                    {lang === 'cpp'
+                      ? 'C++'
+                      : lang === 'javascript'
+                      ? 'JavaScript'
+                      : lang === 'typescript'
+                      ? 'TypeScript'
+                      : lang === 'go'
+                      ? 'Go (Golang)'
+                      : lang === 'rust'
+                      ? 'Rust'
+                      : lang.toUpperCase()}
                   </option>
                 ))}
               </select>
@@ -3240,7 +3250,19 @@ fn main() {
           <div className="flex-1 min-h-[220px] relative cursor-text border-b border-slate-800">
             <Editor
               height="100%"
-              language={selectedLanguage === 'cpp' ? 'cpp' : selectedLanguage}
+              language={
+                selectedLanguage === 'cpp'
+                  ? 'cpp'
+                  : selectedLanguage === 'c'
+                  ? 'c'
+                  : selectedLanguage === 'rust'
+                  ? 'rust'
+                  : selectedLanguage === 'go'
+                  ? 'go'
+                  : selectedLanguage === 'typescript'
+                  ? 'typescript'
+                  : selectedLanguage
+              }
               theme={editorTheme}
               value={currentCode}
               onChange={handleCodeChange}

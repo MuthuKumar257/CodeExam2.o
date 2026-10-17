@@ -76,6 +76,7 @@ export class SubmissionService {
     const executionStarted = Date.now();
     const batch = await executeCodeBatchInSandbox(language, code, testcases);
     const hasCompilationError = batch.results.some((result) => result.status === 'compilation_error');
+    const isToolchainUnavailable = batch.results.some((result) => result.status === 'compiler_unavailable');
 
     const tcMarksConfigured = testcases.some(
       (tc) => (tc.marks !== undefined && tc.marks !== null) || (tc.points !== undefined && tc.points !== null)
@@ -84,8 +85,8 @@ export class SubmissionService {
 
     for (let i = 0; i < testcases.length; i++) {
       const tc = testcases[i];
-      const runResult = batch.results[i];
-      const isPassed = !hasCompilationError && runResult.success && evaluateOutput(runResult.stdout, tc.expected_output);
+      const runResult = batch.results[i] || {};
+      const isPassed = !hasCompilationError && !isToolchainUnavailable && runResult.success && evaluateOutput(runResult.stdout, tc.expected_output);
 
       if (isPassed) {
         passedCount++;
@@ -105,20 +106,20 @@ export class SubmissionService {
         expected_output: tc.is_hidden ? '[Hidden]' : tc.expected_output,
         actual_output: tc.is_hidden ? (isPassed ? '[Matched]' : '[Mismatch]') : runResult.stdout,
         error: runResult.stderr || null,
-        execution_time: runResult.executionTime,
+        execution_time: runResult.executionTime || 0,
         marks_awarded: Math.round((marksAwarded + Number.EPSILON) * 100) / 100,
         max_marks: Math.round((tcWeight + Number.EPSILON) * 100) / 100,
       });
     }
 
-    if (hasCompilationError) {
+    if (hasCompilationError || isToolchainUnavailable) {
       passedCount = 0;
     }
 
     let score = 0;
     let maxScore = questionMarks;
 
-    if (!hasCompilationError) {
+    if (!hasCompilationError && !isToolchainUnavailable) {
       if (isEqualMarks) {
         // Equal Marks per Question is ON: standard ratio formula
         score = calculateQuestionScore({
@@ -139,6 +140,12 @@ export class SubmissionService {
       }
     }
 
+    const calculatedStatus = isToolchainUnavailable
+      ? 'COMPILER_UNAVAILABLE'
+      : hasCompilationError
+        ? 'COMPILATION_ERROR'
+        : (passedCount === totalCount && totalCount > 0 ? 'ACCEPTED' : (passedCount > 0 ? 'PARTIAL' : 'WRONG_ANSWER'));
+
     const newSubmission = {
       id: submissionId,
       submission_id: submissionId,
@@ -156,9 +163,8 @@ export class SubmissionService {
       score,
       max_score: maxScore,
       is_equal_marks: isEqualMarks,
-      status: hasCompilationError
-        ? 'COMPILATION_ERROR'
-        : (passedCount === totalCount && totalCount > 0 ? 'ACCEPTED' : (passedCount > 0 ? 'PARTIAL' : 'WRONG_ANSWER')),
+      status: calculatedStatus,
+      resultStatus: calculatedStatus,
       submitted_at: new Date().toISOString(),
       execution_metrics: {
         requestTime: executionStarted - requestStarted,

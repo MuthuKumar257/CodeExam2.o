@@ -61,12 +61,15 @@ export class SubmissionController {
           executionTime: result.executionTime,
         }));
         const passed = results.filter((result) => result.passed).length;
+        const isToolchainUnavailable = batch.results.some((result) => result.status === 'compiler_unavailable');
         const hasCompilationError = batch.results.some((result) => result.status === 'compilation_error');
-        const passedCount = hasCompilationError ? 0 : passed;
+        const passedCount = (hasCompilationError || isToolchainUnavailable) ? 0 : passed;
         const totalCount = results.length;
-        const statusLabel = hasCompilationError
-          ? 'Compilation Error'
-          : (passedCount === totalCount && totalCount > 0 ? 'Accepted' : 'Wrong Answer');
+        const statusLabel = isToolchainUnavailable
+          ? 'Compiler Unavailable'
+          : hasCompilationError
+            ? 'Compilation Error'
+            : (passedCount === totalCount && totalCount > 0 ? 'Accepted' : 'Wrong Answer');
         return sendSuccess(res, {
           status: statusLabel,
           language: batch.language,
@@ -75,11 +78,22 @@ export class SubmissionController {
           testCaseResults: results,
           executionTimeMs: batch.metrics.executionTime,
           metrics: batch.metrics,
+          toolchainError: batch.toolchainError || undefined,
         });
       }
 
       const result = await executeCodeInSandbox(normalizedLanguage, submittedCode, input || '');
       return sendSuccess(res, result);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async getCompilerStatus(req, res, next) {
+    try {
+      const { auditToolchains } = await import('../services/compilerRegistry.js');
+      const toolchains = await auditToolchains();
+      return sendSuccess(res, { toolchains }, 'Toolchain status retrieved successfully.');
     } catch (err) {
       next(err);
     }
@@ -136,9 +150,12 @@ export class SubmissionController {
         submissionId: submission_id || submissionId || randomUUID(),
       });
 
-      const statusLabel = submission.resultStatus === 'COMPILATION_ERROR'
-        ? 'Compilation Error'
-        : (submission.passed_count === submission.total_testcases && submission.total_testcases > 0 ? 'Accepted' : 'Wrong Answer');
+      const isToolchainUnavailable = submission.resultStatus === 'COMPILER_UNAVAILABLE' || submission.status === 'COMPILER_UNAVAILABLE';
+      const statusLabel = isToolchainUnavailable
+        ? 'Compiler Unavailable'
+        : (submission.resultStatus === 'COMPILATION_ERROR' || submission.status === 'COMPILATION_ERROR')
+          ? 'Compilation Error'
+          : (submission.passed_count === submission.total_testcases && submission.total_testcases > 0 ? 'Accepted' : 'Wrong Answer');
 
       const execResult = {
         status: statusLabel,
