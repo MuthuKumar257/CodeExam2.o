@@ -413,20 +413,19 @@ export function compareOutputs(
 
   const normExp = expStr
     .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
     .split('\n')
     .map((l) => l.trimEnd())
     .join('\n')
-    .trimEnd();
+    .trim();
 
   const normAct = actStr
     .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
     .split('\n')
     .map((l) => l.trimEnd())
     .join('\n')
-    .trimEnd();
+    .trim();
 
-  if (normExp === normAct) return true;
-  if (normExp.replace(/\s+/g, '') === normAct.replace(/\s+/g, '')) return true;
-
-  return false;
+  return normExp === normAct;
 }

@@ -47,9 +47,20 @@ export function calculateTestcaseScore(passedCount, totalCount, questionMarks) {
   });
 }
 
+export function normalizeOutputLines(output) {
+  if (output === null || output === undefined) return '';
+  return String(output)
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .join('\n')
+    .trim();
+}
+
 export function evaluateOutput(actual, expected) {
-  const normActual = String(actual || '').trim().replace(/\r\n/g, '\n');
-  const normExpected = String(expected || '').trim().replace(/\r\n/g, '\n');
+  const normActual = normalizeOutputLines(actual);
+  const normExpected = normalizeOutputLines(expected);
   return normActual === normExpected;
 }
 

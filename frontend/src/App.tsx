@@ -2105,20 +2105,27 @@ export default function App() {
       : `sub-${currentUser.id}-${questionId}`;
 
     try {
+      const authToken = await ensureAuthToken().catch(() => null);
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-User-Id': currentUser.id,
+        'X-User-Role': currentUser.role || 'STUDENT',
+        'X-User-Name': currentUser.name || 'Student',
+      };
+      if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`;
+      }
+
       const res = await fetch('/api/code/submit', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer token`,
-          'X-User-Id': currentUser.id,
-          'X-User-Role': currentUser.role,
-          'X-User-Name': currentUser.name,
-        },
+        headers,
         body: JSON.stringify({
           assessmentId: activeCandidateAssessmentId,
+          testId: activeCandidateAssessmentId,
           questionId,
           language,
           sourceCode,
+          code: sourceCode,
           sessionId: activeSession?.id,
           submissionId: stableSubmissionId,
         }),

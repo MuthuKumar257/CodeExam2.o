@@ -216,6 +216,58 @@ function saveInMemory(table, id, data, config) {
   if (index === -1) records.push(saved);
   else records[index] = saved;
 
+  if (table === 'questions' && data) {
+    const rawCases = data.testcases || data.testCases;
+    const sampleCases = data.sampleTestCases || [];
+    const hiddenCases = data.hiddenTestCases || [];
+    const allExtracted = [];
+
+    if (Array.isArray(rawCases)) {
+      rawCases.forEach((tc, idx) => {
+        allExtracted.push({
+          id: tc.id || `tc-${id}-${idx}`,
+          question_id: id,
+          input: String(tc.input ?? ''),
+          expected_output: String(tc.expectedOutput ?? tc.expected_output ?? tc.output ?? ''),
+          is_hidden: Boolean(tc.isPublic === false || tc.is_hidden),
+          marks: tc.points ?? tc.marks,
+          points: tc.points ?? tc.marks,
+        });
+      });
+    }
+    if (Array.isArray(sampleCases)) {
+      sampleCases.forEach((tc, idx) => {
+        allExtracted.push({
+          id: `tc-sample-${id}-${idx}`,
+          question_id: id,
+          input: String(tc.input ?? ''),
+          expected_output: String(tc.output ?? tc.expectedOutput ?? ''),
+          is_hidden: false,
+        });
+      });
+    }
+    if (Array.isArray(hiddenCases)) {
+      hiddenCases.forEach((tc, idx) => {
+        allExtracted.push({
+          id: `tc-hidden-${id}-${idx}`,
+          question_id: id,
+          input: String(tc.input ?? ''),
+          expected_output: String(tc.output ?? tc.expectedOutput ?? ''),
+          is_hidden: true,
+        });
+      });
+    }
+
+    if (allExtracted.length > 0) {
+      if (!Array.isArray(memoryStore.testcases)) memoryStore.testcases = [];
+      // Keep existing non-matching cases and append/replace extracted cases
+      memoryStore.testcases = [
+        ...memoryStore.testcases.filter((tc) => tc.question_id !== id),
+        ...allExtracted,
+      ];
+    }
+  }
+
   if ((table === 'proctoring_events' || table === 'proctoringEvents') && data && data.sessionId) {
     const sess = memoryStore.sessions.find((s) => s.id === data.sessionId);
     if (sess) {

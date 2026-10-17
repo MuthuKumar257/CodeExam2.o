@@ -2655,7 +2655,13 @@ fn main() {
 
       const statusLabel: QuestionStatusItem['status'] = isAccepted
         ? 'Accepted'
-        : (res.status === 'Compilation Error' ? 'Compilation Error' : (res.status === 'Runtime Error' ? 'Runtime Error' : 'Wrong Answer'));
+        : res.status === 'Compilation Error'
+        ? 'Compilation Error'
+        : res.status === 'Runtime Error'
+        ? 'Runtime Error'
+        : res.status === 'Time Limit Exceeded'
+        ? 'Time Limit Exceeded' as any
+        : 'Wrong Answer';
 
       const qMax = assessment.isEqualMarks
         ? (Number(assessment.marksPerQuestion) || Number(currentQuestion.points) || 10)
@@ -2677,8 +2683,8 @@ fn main() {
         [currentQuestion.id]: {
           status: statusLabel,
           score: computedScore,
-          testCasesPassed: res.testCasesPassed ?? (isAccepted ? (res.totalTestCases || 1) : 0),
-          totalTestCases: res.totalTestCases ?? 1,
+          testCasesPassed: passedCount,
+          totalTestCases: totalCount,
           selectedLanguage: activeQuesLang,
           language: activeQuesLang,
         },

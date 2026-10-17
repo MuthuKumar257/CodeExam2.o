@@ -180,7 +180,99 @@ export class QuestionService {
   }
 
   static async getAllTestcasesForEvaluation(questionId) {
-    return memoryStore.testcases.filter((tc) => tc.question_id === questionId);
+    let cases = memoryStore.testcases.filter((tc) => tc.question_id === questionId);
+    if (cases.length > 0) return cases;
+
+    // Check memoryStore question embedded testcases
+    const question = memoryStore.questions.find((q) => q.id === questionId);
+    if (question) {
+      if (Array.isArray(question.testcases) && question.testcases.length > 0) {
+        return question.testcases;
+      }
+      if (Array.isArray(question.testCases) && question.testCases.length > 0) {
+        return question.testCases.map((tc, idx) => ({
+          id: tc.id || `tc-${idx}`,
+          question_id: questionId,
+          input: String(tc.input ?? ''),
+          expected_output: String(tc.expectedOutput ?? tc.expected_output ?? tc.output ?? ''),
+          is_hidden: Boolean(tc.isPublic === false || tc.is_hidden),
+          marks: tc.points ?? tc.marks,
+          points: tc.points ?? tc.marks,
+        }));
+      }
+      const sample = (question.sampleTestCases || []).map((tc, idx) => ({
+        id: `tc-sample-${idx}`,
+        question_id: questionId,
+        input: String(tc.input ?? ''),
+        expected_output: String(tc.output ?? tc.expectedOutput ?? ''),
+        is_hidden: false,
+      }));
+      const hidden = (question.hiddenTestCases || []).map((tc, idx) => ({
+        id: `tc-hidden-${idx}`,
+        question_id: questionId,
+        input: String(tc.input ?? ''),
+        expected_output: String(tc.output ?? tc.expectedOutput ?? ''),
+        is_hidden: true,
+      }));
+      if (sample.length > 0 || hidden.length > 0) {
+        return [...sample, ...hidden];
+      }
+    }
+
+    // Try fetching from Supabase if configured
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data: dbCases, error: tcErr } = await supabase
+          .from('testcases')
+          .select('*')
+          .eq('question_id', questionId);
+        if (!tcErr && Array.isArray(dbCases) && dbCases.length > 0) {
+          return dbCases;
+        }
+
+        const { data: qData, error: qErr } = await supabase
+          .from('questions')
+          .select('*')
+          .eq('id', questionId)
+          .maybeSingle();
+        if (!qErr && qData) {
+          const rawQ = qData.data && typeof qData.data === 'object' ? { ...qData.data, ...qData } : qData;
+          if (Array.isArray(rawQ.testcases) && rawQ.testcases.length > 0) return rawQ.testcases;
+          if (Array.isArray(rawQ.testCases) && rawQ.testCases.length > 0) {
+            return rawQ.testCases.map((tc, idx) => ({
+              id: tc.id || `tc-${idx}`,
+              question_id: questionId,
+              input: String(tc.input ?? ''),
+              expected_output: String(tc.expectedOutput ?? tc.expected_output ?? tc.output ?? ''),
+              is_hidden: Boolean(tc.isPublic === false || tc.is_hidden),
+              marks: tc.points ?? tc.marks,
+              points: tc.points ?? tc.marks,
+            }));
+          }
+          const sample = (rawQ.sampleTestCases || []).map((tc, idx) => ({
+            id: `tc-sample-${idx}`,
+            question_id: questionId,
+            input: String(tc.input ?? ''),
+            expected_output: String(tc.output ?? tc.expectedOutput ?? ''),
+            is_hidden: false,
+          }));
+          const hidden = (rawQ.hiddenTestCases || []).map((tc, idx) => ({
+            id: `tc-hidden-${idx}`,
+            question_id: questionId,
+            input: String(tc.input ?? ''),
+            expected_output: String(tc.output ?? tc.expectedOutput ?? ''),
+            is_hidden: true,
+          }));
+          if (sample.length > 0 || hidden.length > 0) {
+            return [...sample, ...hidden];
+          }
+        }
+      } catch (err) {
+        logger.warn('Supabase getAllTestcasesForEvaluation fallback error:', err.message);
+      }
+    }
+
+    return [];
   }
 
   static async addTestcase(questionId, data) {

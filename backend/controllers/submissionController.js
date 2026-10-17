@@ -131,11 +131,19 @@ export class SubmissionController {
       }
       if (targetSessionId) {
         const session = await SessionService.getSessionById(targetSessionId);
-        if (!session || session.student_id !== targetStudentId || session.test_id !== targetTestId) {
-          return sendError(res, 'Assessment attempt is invalid.', 409, 'INVALID_ATTEMPT');
-        }
-        if (session.end_time && Date.now() >= new Date(session.end_time).getTime()) {
-          return sendError(res, 'Assessment attempt has expired.', 409, 'ATTEMPT_EXPIRED');
+        if (session) {
+          const sessStudentId = session.student_id || session.candidateId || session.studentId;
+          const sessTestId = session.test_id || session.assessmentId || session.testId;
+          if (sessStudentId && sessStudentId !== targetStudentId) {
+            return sendError(res, 'Assessment attempt belongs to another student.', 409, 'INVALID_ATTEMPT');
+          }
+          if (sessTestId && sessTestId !== targetTestId) {
+            return sendError(res, 'Assessment attempt does not match this assessment.', 409, 'INVALID_ATTEMPT');
+          }
+          const sessionEndTime = session.end_time || session.endTime;
+          if (sessionEndTime && Date.now() >= new Date(sessionEndTime).getTime()) {
+            return sendError(res, 'Assessment attempt has expired.', 409, 'ATTEMPT_EXPIRED');
+          }
         }
       }
 
@@ -151,11 +159,21 @@ export class SubmissionController {
       });
 
       const isToolchainUnavailable = submission.resultStatus === 'COMPILER_UNAVAILABLE' || submission.status === 'COMPILER_UNAVAILABLE';
+      const isCompilationError = submission.resultStatus === 'COMPILATION_ERROR' || submission.status === 'COMPILATION_ERROR';
+      const isTimeLimit = submission.resultStatus === 'TIME_LIMIT_EXCEEDED';
+      const isRuntimeError = submission.resultStatus === 'RUNTIME_ERROR';
+
       const statusLabel = isToolchainUnavailable
         ? 'Compiler Unavailable'
-        : (submission.resultStatus === 'COMPILATION_ERROR' || submission.status === 'COMPILATION_ERROR')
+        : isCompilationError
           ? 'Compilation Error'
-          : (submission.passed_count === submission.total_testcases && submission.total_testcases > 0 ? 'Accepted' : 'Wrong Answer');
+          : isTimeLimit
+            ? 'Time Limit Exceeded'
+            : isRuntimeError
+              ? 'Runtime Error'
+              : (submission.passed_count === submission.total_testcases && submission.total_testcases > 0 ? 'Accepted' : 'Wrong Answer');
+
+      const firstError = submission.testcase_results.find((r) => r.error)?.error || null;
 
       const execResult = {
         status: statusLabel,
@@ -166,6 +184,7 @@ export class SubmissionController {
         testCasesPassed: submission.passed_count,
         totalTestCases: submission.total_testcases,
         executionTimeMs: submission.executionTime,
+        stderr: firstError,
         testCaseResults: submission.testcase_results.map((result) => ({
           id: result.testcase_id,
           passed: result.passed,

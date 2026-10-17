@@ -140,11 +140,18 @@ export class SubmissionService {
       }
     }
 
+    const hasTimeLimitExceeded = batch.results.some((result) => result.status === 'time_limit_exceeded');
+    const hasRuntimeError = batch.results.some((result) => result.status === 'runtime_error');
+
     const calculatedStatus = isToolchainUnavailable
       ? 'COMPILER_UNAVAILABLE'
       : hasCompilationError
         ? 'COMPILATION_ERROR'
-        : (passedCount === totalCount && totalCount > 0 ? 'ACCEPTED' : (passedCount > 0 ? 'PARTIAL' : 'WRONG_ANSWER'));
+        : hasTimeLimitExceeded
+          ? 'TIME_LIMIT_EXCEEDED'
+          : hasRuntimeError && passedCount === 0
+            ? 'RUNTIME_ERROR'
+            : (passedCount === totalCount && totalCount > 0 ? 'ACCEPTED' : (passedCount > 0 ? 'PARTIAL' : 'WRONG_ANSWER'));
 
     const newSubmission = {
       id: submissionId,
